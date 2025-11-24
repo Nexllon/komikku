@@ -279,24 +279,6 @@ internal object ExtensionLoader {
         if (signatures.isNullOrEmpty()) {
             logcat(LogPriority.WARN) { "Package $pkgName isn't signed" }
             return LoadResult.Error
-        } else if (!trustExtension.isTrusted(pkgInfo, signatures)) {
-            val extension = Extension.Untrusted(
-                extName,
-                pkgName,
-                versionName,
-                versionCode,
-                libVersion,
-                signatures.last(),
-                // KMK -->
-                repoName = repos.firstOrNull { repo ->
-                    signatures.all { it == repo.signingKeyFingerprint }
-                }?.let { repo ->
-                    repo.shortName.takeIf { !it.isNullOrBlank() } ?: repo.name
-                },
-                // KMK <--
-            )
-            logcat(LogPriority.WARN) { "Extension $pkgName isn't trusted" }
-            return LoadResult.Untrusted(extension)
         }
 
         val isNsfw = appInfo.metaData.getInt(METADATA_NSFW) == 1

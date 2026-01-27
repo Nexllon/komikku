@@ -144,8 +144,8 @@ abstract class SearchScreenModel(
         preferences.globalSearchFilterState().toggle()
     }
 
-    fun search(query: String? = state.value.searchQuery) {
-
+    fun search() {
+        val query = state.value.searchQuery
         val sourceFilter = state.value.sourceFilter
 
         if (query.isNullOrBlank()) return

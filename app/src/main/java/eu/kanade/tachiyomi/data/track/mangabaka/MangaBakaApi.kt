@@ -10,6 +10,7 @@ import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaItemResult
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaListResult
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaOAuth
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaSearchResult
+import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaUserInfo
 import eu.kanade.tachiyomi.data.track.model.TrackMangaMetadata
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import eu.kanade.tachiyomi.network.DELETE
@@ -309,6 +310,17 @@ class MangaBakaApi(
                             artists = it.artists.orEmpty()
                         }
                     }
+            }
+        }
+    }
+
+    suspend fun getScoreStepSize(): Int {
+        return withIOContext {
+            with(json) {
+                authClient.newCall(GET("$OAUTH_URL/userinfo"))
+                    .awaitSuccess()
+                    .parseAs<MangaBakaUserInfo>()
+                    .ratingSteps
             }
         }
     }

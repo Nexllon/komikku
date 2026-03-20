@@ -361,7 +361,7 @@ class MangaBakaApi(
             body = FormBody.Builder()
                 .add("grant_type", "refresh_token")
                 .add("client_id", CLIENT_ID)
-                .add("refreshToken", token)
+                .add("refresh_token", token)
                 .add("redirect_uri", REDIRECT_URI)
                 .build(),
         )

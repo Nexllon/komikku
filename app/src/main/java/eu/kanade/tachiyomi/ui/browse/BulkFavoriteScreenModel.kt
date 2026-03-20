@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.ui.browse
 
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -61,8 +60,6 @@ class BulkFavoriteScreenModel(
     private val addTracks: AddTracks = Injekt.get(),
     // KMK -->
     private val syncChaptersWithSource: SyncChaptersWithSource = Injekt.get(),
-    val snackbarHostState: SnackbarHostState = SnackbarHostState(),
-    // KMK <--
 ) : StateScreenModel<BulkFavoriteScreenModel.State>(initialState) {
 
     fun backHandler() {
@@ -85,7 +82,7 @@ class BulkFavoriteScreenModel(
     }
 
     /**
-     * @param toSelectedState set to true to only Select, set to false to only Unselect
+     * @param toSelectedState set to `true` to only Select, set to `false` to only Unselect
      */
     fun toggleSelection(manga: Manga, toSelectedState: Boolean? = null) {
         mutableState.update { state ->
@@ -133,7 +130,7 @@ class BulkFavoriteScreenModel(
             if (entryWithDuplicates != null) {
                 val (index, manga, duplicates) = entryWithDuplicates
                 if (state.value.selection.size == 1) {
-                    // If only one manga is selected, show the multiple duplicates dialog.
+                    // If only one manga is selected, show the multiple-duplicates dialog.
                     setDialog(Dialog.AddDuplicateManga(manga, duplicates))
                 } else {
                     setDialog(Dialog.BulkAllowDuplicate(manga, duplicates, index))
@@ -268,17 +265,22 @@ class BulkFavoriteScreenModel(
                 setMangaDefaultChapterFlags.await(manga)
                 addTracks.bindEnhancedTrackers(manga, source)
                 updateManga.awaitUpdateFavorite(manga.id, true)
-                if (libraryPreferences.syncOnAdd().get()) {
+                val fetchMetadataOnAdd = libraryPreferences.fetchMetadataOnAdd().get()
+                val fetchChaptersOnAdd = libraryPreferences.fetchChaptersOnAdd().get()
+                if (fetchMetadataOnAdd || fetchChaptersOnAdd) {
                     val sManga = manga.toSManga()
-                    val remoteManga = source.getMangaDetails(sManga)
-                    val chapters = source.getChapterList(sManga)
-                    // Use `manga` instead of `new` so its title got updated with source's `getMangaDetails`
-                    updateManga.awaitUpdateFromSource(manga, remoteManga, false, coverCache)
-                    syncChaptersWithSource.await(chapters, manga, source, false)
+                    if (fetchMetadataOnAdd) {
+                        val remoteMetadata = source.getMangaDetails(sManga)
+                        // Use `manga` instead of `new` so its title got updated with source's `getMangaDetails`
+                        updateManga.awaitUpdateFromSource(manga, remoteMetadata, false, coverCache)
+                    }
+                    if (fetchChaptersOnAdd) {
+                        val chapters = source.getChapterList(sManga)
+                        syncChaptersWithSource.await(chapters, manga, source, false)
+                    }
                 }
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR, e)
-                snackbarHostState.showSnackbar(message = "Failed to sync manga: ${e.message}")
             }
         }
     }
@@ -363,19 +365,23 @@ class BulkFavoriteScreenModel(
             }
 
             updateManga.await(new.toMangaUpdate().copy(chapterFlags = null))
-            // KMK -->
-            if (new.favorite && libraryPreferences.syncOnAdd().get()) {
+            val fetchMetadataOnAdd = libraryPreferences.fetchMetadataOnAdd().get()
+            val fetchChaptersOnAdd = libraryPreferences.fetchChaptersOnAdd().get()
+            if (new.favorite && (fetchMetadataOnAdd || fetchChaptersOnAdd)) {
                 withIOContext {
                     try {
                         val sManga = manga.toSManga()
-                        val remoteManga = source.getMangaDetails(sManga)
-                        val chapters = source.getChapterList(sManga)
-                        // Use `manga` instead of `new` so its title got updated with source's `getMangaDetails`
-                        updateManga.awaitUpdateFromSource(manga, remoteManga, false, coverCache)
-                        syncChaptersWithSource.await(chapters, manga, source, false)
+                        if (fetchMetadataOnAdd) {
+                            val remoteMetadata = source.getMangaDetails(sManga)
+                            // Use `manga` instead of `new` so its title got updated with source's `getMangaDetails`
+                            updateManga.awaitUpdateFromSource(manga, remoteMetadata, false, coverCache)
+                        }
+                        if (fetchChaptersOnAdd) {
+                            val chapters = source.getChapterList(sManga)
+                            syncChaptersWithSource.await(chapters, manga, source, false)
+                        }
                     } catch (e: Exception) {
                         logcat(LogPriority.ERROR, e)
-                        snackbarHostState.showSnackbar(message = "Failed to sync manga: ${e.message}")
                     }
                 }
             }

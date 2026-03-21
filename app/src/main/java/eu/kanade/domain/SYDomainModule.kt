@@ -69,6 +69,7 @@ import tachiyomi.domain.source.interactor.GetSavedSearchGlobalFeed
 import tachiyomi.domain.source.interactor.InsertFeedSavedSearch
 import tachiyomi.domain.source.interactor.InsertSavedSearch
 import tachiyomi.domain.source.interactor.ReorderFeed
+import tachiyomi.domain.source.interactor.UpdateSavedSearch
 import tachiyomi.domain.source.repository.FeedSavedSearchRepository
 import tachiyomi.domain.source.repository.SavedSearchRepository
 import tachiyomi.domain.track.interactor.IsTrackUnfollowed
@@ -143,6 +144,7 @@ class SYDomainModule : InjektModule {
         addFactory { GetSavedSearchBySourceId(get()) }
         addFactory { DeleteSavedSearchById(get()) }
         addFactory { InsertSavedSearch(get()) }
+        addFactory { UpdateSavedSearch(get()) }
         addFactory { GetExhSavedSearch(get(), get(), get()) }
 
         addSingletonFactory<FeedSavedSearchRepository> { FeedSavedSearchRepositoryImpl(get()) }

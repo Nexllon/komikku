@@ -42,7 +42,7 @@ data class MangaBakaCover(
 
 @Serializable
 data class MangaBakaRawCover(
-    val url: String,
+    val url: String?,
 )
 
 @Serializable

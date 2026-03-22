@@ -21,6 +21,8 @@ import eu.kanade.tachiyomi.network.PUT
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.network.parseAs
 import eu.kanade.tachiyomi.util.PkceUtil
+import eu.kanade.tachiyomi.util.lang.htmlDecode
+import eu.kanade.tachiyomi.util.lang.toLocalDate
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -85,10 +87,10 @@ class MangaBakaApi(
                     put("rating", track.score.toInt().coerceIn(0, 100))
                 }
                 if (track.started_reading_date > 0) {
-                    put("start_date", Instant.fromEpochMilliseconds(track.started_reading_date).toString())
+                    put("start_date", track.started_reading_date.toLocalDate().toString())
                 }
                 if (track.finished_reading_date > 0) {
-                    put("finish_date", Instant.fromEpochMilliseconds(track.finished_reading_date).toString())
+                    put("finish_date", track.finished_reading_date.toLocalDate().toString())
                 }
             }
                 .toString()
@@ -220,12 +222,12 @@ class MangaBakaApi(
                     put("rating", null)
                 }
                 if (track.started_reading_date > 0) {
-                    put("start_date", Instant.fromEpochMilliseconds(track.started_reading_date).toString())
+                    put("start_date", track.started_reading_date.toLocalDate().toString())
                 } else {
                     put("start_date", null)
                 }
                 if (track.finished_reading_date > 0) {
-                    put("finish_date", Instant.fromEpochMilliseconds(track.finished_reading_date).toString())
+                    put("finish_date", track.finished_reading_date.toLocalDate().toString())
                 } else {
                     put("finish_date", null)
                 }
@@ -258,10 +260,7 @@ class MangaBakaApi(
                             remoteId = it.id,
                             title = it.title,
                             thumbnailUrl = it.cover.raw.url,
-                            description = android.text.Html.fromHtml(it.description.orEmpty(), android.text.Html.FROM_HTML_MODE_LEGACY)
-                                .toString()
-                                .trim()
-                                .ifEmpty { null },
+                            description = it.description.orEmpty().htmlDecode().trim().ifEmpty { null },
                             authors = it.authors?.joinToString(", ")?.ifEmpty { null },
                             artists = it.artists?.joinToString(", ")?.ifEmpty { null },
                         )

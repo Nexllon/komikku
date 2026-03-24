@@ -7,11 +7,11 @@ import tachiyomi.domain.source.model.FeedSavedSearchUpdate
 import tachiyomi.domain.source.repository.FeedSavedSearchRepository
 
 class UpdateFeedSavedSearch(
-    private val repository: FeedSavedSearchRepository,
+    private val FeedSavedSearchRepository: FeedSavedSearchRepository,
 ) {
     suspend fun await(update: FeedSavedSearchUpdate) {
         try {
-            repository.updatePartial(update)
+            FeedSavedSearchRepository.updatePartial(update)
         } catch (e: Exception) {
             logcat(LogPriority.ERROR) { e.asLog() }
         }

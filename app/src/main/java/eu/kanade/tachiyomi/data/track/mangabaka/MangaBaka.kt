@@ -123,7 +123,7 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
 
     override suspend fun search(query: String): List<TrackSearch> {
         val normalized = TRACKER_PATTERNS
-            .firstNotNullOfOrNull { (tracker, prefix) -> tracker.find(query)?.groupValues?.get(1)?.let { "$prefix$it" }}
+            .firstNotNullOfOrNull { (tracker, prefix) -> tracker.find(query)?.groupValues?.get(1)?.let { "$prefix$it" } }
             ?: query
         return api.search(normalized)
     }

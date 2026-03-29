@@ -123,7 +123,7 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
 
     override suspend fun search(query: String): List<TrackSearch> {
         val normalized = TRACKER_PATTERNS
-            .firstNotNullOfOrNull { (regex, id) -> regex.find(query)?.let { regex.replace(query, id) } }
+            .firstNotNullOfOrNull { (tracker, prefix) -> tracker.find(query)?.groupValues?.get(1)?.let { "$prefix$it" }}
             ?: query
         return api.search(normalized)
     }
@@ -203,9 +203,9 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
         const val STEP_25 = "STEP_25"
 
         private val TRACKER_PATTERNS = listOf(
-            Regex("""myanimelist\.net/manga/(\d+)""") to "mal:$1",
-            Regex("""mangaupdates\.com/series/([^/?#]+)""") to "mu:$1",
-            Regex("""anilist\.co/manga/(\d+)""") to "al:$1",
+            Regex("""myanimelist\.net/manga/(\d+)""") to "mal:",
+            Regex("""mangaupdates\.com/series/([^/?#]+)""") to "mu:",
+            Regex("""anilist\.co/manga/(\d+)""") to "al:",
         )
     }
 

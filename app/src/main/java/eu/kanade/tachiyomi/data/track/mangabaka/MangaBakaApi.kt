@@ -9,6 +9,7 @@ import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaItemResult
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaListResult
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaOAuth
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaSearchResult
+import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaUserProfile
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaUserProfileResponse
 import eu.kanade.tachiyomi.data.track.model.TrackMangaMetadata
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
@@ -33,9 +34,7 @@ import tachiyomi.core.common.util.lang.withIOContext
 import uy.kohesive.injekt.injectLazy
 import java.math.RoundingMode
 import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Instant
-import timber.log.Timber
 import tachiyomi.domain.track.model.Track as DomainTrack
 
 class MangaBakaApi(
@@ -43,92 +42,41 @@ class MangaBakaApi(
     private val client: OkHttpClient,
     interceptor: MangaBakaInterceptor,
 ) {
+
     private val json: Json by injectLazy()
+
     private val authClient = client.newBuilder().addInterceptor(interceptor).build()
 
-    private data class CacheEntry<T>(val value: T, val expiresAt: Long)
-
-    // In-memory TTL caches (thread-safe)
-    private val mangaCache = ConcurrentHashMap<Long, CacheEntry<MangaBakaItem>>()
-    private val libraryCache = ConcurrentHashMap<Long, CacheEntry<eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaListEntry>>()
-
-    private fun now() = System.currentTimeMillis()
-
     suspend fun getMangaItem(seriesId: Long): MangaBakaItem {
-        mangaCache[seriesId]?.let { entry ->
-            if (now() < entry.expiresAt) {
-                Timber.tag(TAG).d("getMangaItem: cache hit for $seriesId")
-                return entry.value
-            } else {
-                Timber.tag(TAG).d("getMangaItem: cache expired for $seriesId")
-                mangaCache.remove(seriesId)
-            }
-        }
-        Timber.tag(TAG).d("GET series info: $API_BASE_URL/v1/series/$seriesId")
-        val item = with(json) {
+        return with(json) {
             authClient.newCall(GET("$API_BASE_URL/v1/series/$seriesId"))
                 .awaitSuccess()
                 .parseAs<MangaBakaItemResult>()
                 .data
         }
-        mangaCache[seriesId] = CacheEntry(item, now() + CACHE_TTL_MS)
-        return item
-    }
-
-    suspend fun getLibraryEntry(seriesId: Long): eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaListEntry? {
-        libraryCache[seriesId]?.let { entry ->
-            if (now() < entry.expiresAt) {
-                Timber.tag(TAG).d("getLibraryEntry: cache hit for $seriesId")
-                return entry.value
-            } else {
-                Timber.tag(TAG).d("getLibraryEntry: cache expired for $seriesId")
-                libraryCache.remove(seriesId)
-            }
-        }
-        Timber.tag(TAG).d("GET library entry: $LIBRARY_API_URL/$seriesId")
-        val entry = runCatching {
-            with(json) {
-                authClient.newCall(GET("$LIBRARY_API_URL/$seriesId"))
-                    .awaitSuccess()
-                    .parseAs<MangaBakaListResult>()
-                    .data
-            }
-        }.getOrNull()
-        if (entry != null) {
-            libraryCache[seriesId] = CacheEntry(entry, now() + CACHE_TTL_MS)
-        }
-        return entry
     }
 
     suspend fun resolveId(seriesId: Long): Long {
         return withIOContext {
-            val item = getMangaItem(seriesId)
-            val resolved = item.mergedWith ?: item.id
-            Timber.tag(TAG).d("resolveId: seriesId=$seriesId resolvedId=$resolved")
-            resolved
+            with(json) {
+                val item = authClient.newCall(GET("$API_BASE_URL/v1/series/$seriesId"))
+                    .awaitSuccess()
+                    .parseAs<MangaBakaItemResult>()
+                    .data
+
+                item.mergedWith ?: item.id
+            }
         }
     }
 
     suspend fun addLibManga(track: Track): Track {
         return withIOContext {
-            Timber.tag(TAG).d("addLibManga: input.remote_id=${track.remote_id}")
-            val resolvedId: Long
-            val seriesData: MangaBakaItem
-
-            run {
-                val result = getMangaItem(track.remote_id)
-                resolvedId = result.mergedWith ?: result.id
-                seriesData = result
-                Timber.tag(TAG).d("addLibManga: resolvedId=$resolvedId")
-            }
-
+            val resolvedId = resolveId(track.remote_id)
             if (resolvedId != track.remote_id) {
-                Timber.tag(TAG).d("addLibManga: change track.remote_id from ${track.remote_id} to $resolvedId")
                 track.remote_id = resolvedId
             }
 
             val url = "$LIBRARY_API_URL/${track.remote_id}"
-            Timber.tag(TAG).d("addLibManga: POST $url")
             val body = buildJsonObject {
                 put("is_private", track.private)
                 put("state", track.toApiStatus())
@@ -144,31 +92,35 @@ class MangaBakaApi(
                 if (track.finished_reading_date > 0) {
                     put("finish_date", track.finished_reading_date.toLocalDate().toString())
                 }
-            }.toString().toRequestBody()
+            }
+                .toString()
+                .toRequestBody()
 
             authClient
                 .newCall(POST(url, body = body, headers = headersOf("Content-Type", APP_JSON)))
                 .awaitSuccess()
 
-            // seriesData loaded above
+            // only returns 201 with the body { "status": 201, "data": true }, so no library ID for us
+            val seriesData = with(json) {
+                authClient.newCall(GET("$API_BASE_URL/v1/series/${track.remote_id}"))
+                    .awaitSuccess()
+                    .parseAs<MangaBakaItemResult>()
+                    .data
+            }
             track.title = seriesData.title
             track.total_chapters = seriesData.totalChapters?.toLongOrNull() ?: 0
-            Timber.tag(TAG).d("addLibManga: set title=${track.title} total_chapters=${track.total_chapters}")
             track
         }
     }
 
     suspend fun deleteLibManga(track: DomainTrack) {
         withIOContext {
-            Timber.tag(TAG).d("deleteLibManga: input.remoteId=${track.remoteId}")
             val resolvedId = resolveId(track.remoteId)
             val url = "$LIBRARY_API_URL/$resolvedId"
-            Timber.tag(TAG).d("deleteLibManga: DELETE $url")
+
             authClient
                 .newCall(DELETE(url))
                 .awaitSuccess()
-            // Invalidate cache
-            libraryCache.remove(resolvedId)
         }
     }
 
@@ -177,65 +129,54 @@ class MangaBakaApi(
             with(json) {
                 try {
                     val originalId = track.remote_id
-                    Timber.tag(TAG).d("findLibManga: originalId=$originalId")
 
-                    val entry = getLibraryEntry(originalId)
-                    var additionalData: MangaBakaItem? = null
-                    var resolvedId = originalId
+                    val userData = authClient.newCall(GET("$LIBRARY_API_URL/$originalId"))
+                        .awaitSuccess()
+                        .parseAs<MangaBakaListResult>()
+                        .data
 
-                    val seriesResult = runCatching {
-                        val item = getMangaItem(originalId)
-                        additionalData = item
-                        resolvedId = item.mergedWith ?: item.id
-                        Timber.tag(TAG).d("findLibManga: series info resolvedId=$resolvedId")
-                        item
-                    }
-                    if (seriesResult.isFailure && seriesResult.exceptionOrNull() is HttpException && (seriesResult.exceptionOrNull() as HttpException).code == 404) {
-                        val mergeResult = runCatching {
-                            Timber.tag(TAG).d("findLibManga: series not found, attempt resolveId")
-                            val mergedId = resolveId(originalId)
-                            resolvedId = mergedId
-                            Timber.tag(TAG).d("findLibManga: resolved mergedId=$mergedId, GET $API_BASE_URL/v1/series/$mergedId")
-                            val mergedItem = getMangaItem(mergedId)
-                            additionalData = mergedItem
-                            mergedItem
+                    val additionalData = runCatching {
+                        authClient.newCall(GET("$API_BASE_URL/v1/series/$originalId"))
+                            .awaitSuccess()
+                            .parseAs<MangaBakaItemResult>()
+                            .data
+                    }.getOrElse { e ->
+                        if (e is HttpException && e.code == 404) {
+                            val resolvedId = resolveId(originalId)
+                            authClient.newCall(GET("$API_BASE_URL/v1/series/$resolvedId"))
+                                .awaitSuccess()
+                                .parseAs<MangaBakaItemResult>()
+                                .data
+                        } else {
+                            throw e
                         }
-                        if (mergeResult.isFailure) throw mergeResult.exceptionOrNull()!!
                     }
+
+                    val resolvedId = additionalData.mergedWith ?: additionalData.id
 
                     if (resolvedId != originalId) {
                         runCatching {
-                            Timber.tag(TAG).d("findLibManga: deleting old entry $LIBRARY_API_URL/$originalId")
                             authClient.newCall(DELETE("$LIBRARY_API_URL/$originalId")).awaitSuccess()
                         }
-                        Timber.tag(TAG).d("findLibManga: update track.remote_id from $originalId to $resolvedId")
                         track.remote_id = resolvedId
                     }
 
-                    if (entry != null && additionalData != null) {
-                        Timber.tag(TAG).d("findLibManga: found entry and series, creating Track")
-                        Track.create(TrackerManager.MANGABAKA).apply {
-                            remote_id = resolvedId
-                            title = additionalData!!.title
-                            status = entry.getStatus()
-                            score = entry.rating?.toDouble() ?: 0.0
-                            started_reading_date = entry.startDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
-                            finished_reading_date =
-                                entry.finishDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
-                            last_chapter_read = entry.progressChapter ?: 0.0
-                            total_chapters = additionalData!!.totalChapters?.toLongOrNull() ?: 0
-                            private = entry.isPrivate
-                        }
-                    } else {
-                        Timber.tag(TAG).d("findLibManga: not found (null)")
-                        null
-                    }
+                    Track.create(TrackerManager.MANGABAKA).apply {
+                        remote_id = resolvedId
+                        title = additionalData.title
+                        status = userData.getStatus()
+                        score = userData.rating?.toDouble() ?: 0.0
+                        started_reading_date = userData.startDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
+                        finished_reading_date =
+                            userData.finishDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
+                        last_chapter_read = userData.progressChapter ?: 0.0
+                        total_chapters = additionalData.totalChapters?.toLongOrNull() ?: 0
+                        private = userData.isPrivate
+                    }.also { if (resolvedId != originalId) updateLibManga(it) }
                 } catch (e: HttpException) {
                     if (e.code == 404) {
-                        Timber.tag(TAG).d("findLibManga: not found (404)")
                         null
                     } else {
-                        Timber.tag(TAG).e(e, "findLibManga: error")
                         throw e
                     }
                 }
@@ -246,25 +187,23 @@ class MangaBakaApi(
     suspend fun updateLibManga(track: Track): Track {
         return withIOContext {
             val originalId = track.remote_id
-            var resolvedId = originalId
-            Timber.tag(TAG).d("updateLibManga: originalId=$originalId")
+            val resolvedId = resolveId(originalId)
 
-            var entry: eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaListEntry? = null
-
-            entry = getLibraryEntry(originalId)
-
-            val shouldResolve = entry == null
-            if (shouldResolve) {
-                resolvedId = resolveId(originalId)
-                if (resolvedId != originalId) {
-                    runCatching {
-                        Timber.tag(TAG).d("updateLibManga: deleting old entry $LIBRARY_API_URL/$originalId")
-                        authClient.newCall(DELETE("$LIBRARY_API_URL/$originalId")).awaitSuccess()
-                    }
-                    Timber.tag(TAG).d("updateLibManga: update track.remote_id from $originalId to $resolvedId")
-                    track.remote_id = resolvedId
+            if (resolvedId != originalId) {
+                runCatching {
+                    authClient.newCall(DELETE("$LIBRARY_API_URL/$originalId")).awaitSuccess()
                 }
+                track.remote_id = resolvedId
             }
+
+            val entry = runCatching {
+                with(json) {
+                    authClient.newCall(GET("$LIBRARY_API_URL/${track.remote_id}"))
+                        .awaitSuccess()
+                        .parseAs<MangaBakaListResult>()
+                        .data
+                }
+            }.getOrNull()
 
             val nextRereads = if (track.toApiStatus() == "completed" && entry?.state == "rereading") {
                 (entry.numberOfRereads ?: 0) + 1
@@ -299,23 +238,25 @@ class MangaBakaApi(
                 if (nextRereads != null) {
                     put("number_of_rereads", nextRereads)
                 }
-            }.toString().toRequestBody()
+            }
+                .toString()
+                .toRequestBody()
 
-            Timber.tag(TAG).d("updateLibManga: PUT $url")
             authClient
                 .newCall(PUT(url, body = body, headers = headersOf("Content-Type", APP_JSON)))
                 .awaitSuccess()
-            // Invalidate cache as entry is now updated
-            libraryCache.remove(track.remote_id)
 
             val latestData = runCatching {
-                Timber.tag(TAG).d("updateLibManga: GET (final info) $API_BASE_URL/v1/series/${track.remote_id}")
-                getMangaItem(track.remote_id)
+                with(json) {
+                    authClient.newCall(GET("$API_BASE_URL/v1/series/${track.remote_id}"))
+                        .awaitSuccess()
+                        .parseAs<MangaBakaItemResult>()
+                        .data
+                }
             }.getOrNull()
             if (latestData != null) {
                 track.title = latestData.title
                 track.total_chapters = latestData.totalChapters?.toLongOrNull() ?: 0
-                Timber.tag(TAG).d("updateLibManga: set title=${track.title} total_chapters=${track.total_chapters}")
             }
             track
         }
@@ -327,7 +268,6 @@ class MangaBakaApi(
                 .appendQueryParameter("q", search)
                 .appendQueryParameter("type_not", "novel")
                 .build()
-            Timber.tag(TAG).d("search: $url")
             with(json) {
                 client.newCall(GET(url.toString()))
                     .awaitSuccess()
@@ -362,16 +302,21 @@ class MangaBakaApi(
         return withIOContext {
             with(json) {
                 val resolvedId = resolveId(track.remoteId)
-                Timber.tag(TAG).d("getMangaMetadata: GET series info $API_BASE_URL/v1/series/$resolvedId")
-                val item = getMangaItem(resolvedId)
-                TrackMangaMetadata(
-                    remoteId = item.id,
-                    title = item.title,
-                    thumbnailUrl = item.cover.raw.url,
-                    description = item.description.orEmpty().htmlDecode().trim().ifEmpty { null },
-                    authors = item.authors?.joinToString(", ")?.ifEmpty { null },
-                    artists = item.artists?.joinToString(", ")?.ifEmpty { null },
-                )
+
+                authClient.newCall(GET("$API_BASE_URL/v1/series/$resolvedId"))
+                    .awaitSuccess()
+                    .parseAs<MangaBakaItemResult>()
+                    .data
+                    .let {
+                        TrackMangaMetadata(
+                            remoteId = it.id,
+                            title = it.title,
+                            thumbnailUrl = it.cover.raw.url,
+                            description = it.description.orEmpty().htmlDecode().trim().ifEmpty { null },
+                            authors = it.authors?.joinToString(", ")?.ifEmpty { null },
+                            artists = it.artists?.joinToString(", ")?.ifEmpty { null },
+                        )
+                    }
             }
         }
     }
@@ -379,7 +324,6 @@ class MangaBakaApi(
     suspend fun getScoreStepSize(): Int {
         return withIOContext {
             with(json) {
-                Timber.tag(TAG).d("getScoreStepSize: GET $API_BASE_URL/v1/my/profile")
                 authClient.newCall(GET("$API_BASE_URL/v1/my/profile"))
                     .awaitSuccess()
                     .parseAs<MangaBakaUserProfileResponse>()
@@ -391,7 +335,6 @@ class MangaBakaApi(
 
     suspend fun getAccessToken(code: String): MangaBakaOAuth {
         return withIOContext {
-            Timber.tag(TAG).d("getAccessToken: code=$code")
             val formBody = FormBody.Builder()
                 .add("client_id", CLIENT_ID)
                 .add("code", code)
@@ -403,7 +346,6 @@ class MangaBakaApi(
                 .build()
 
             with(json) {
-                Timber.tag(TAG).d("getAccessToken: POST ${OAUTH_URL}/token")
                 client.newCall(POST("${OAUTH_URL}/token", body = formBody))
                     .awaitSuccess().parseAs()
             }
@@ -425,11 +367,6 @@ class MangaBakaApi(
 
         private var codeVerifier: String = ""
 
-        /** Timber Tag for logcat filtering */
-        private const val TAG = "mangabaka"
-
-        private const val CACHE_TTL_MS = 60_000L // 1 minute
-
         fun authUrl(): Uri = "$OAUTH_URL/authorize".toUri().buildUpon()
             .appendQueryParameter("client_id", CLIENT_ID)
             .appendQueryParameter("code_challenge", getPkceS256ChallengeCode())
@@ -450,6 +387,11 @@ class MangaBakaApi(
         )
 
         private fun getPkceS256ChallengeCode(): String {
+            // MangaBaka requires an actually conformant PKCE process, unlike MAL
+            // 1. create verifier
+            // 2. create challenge from verifier (S256 hash -> base64 URL encode)
+            // 3. send challenge to /authorize
+            // 4. send verifier for access tokens to /token
             val codes = PkceUtil.generateS256Codes()
             codeVerifier = codes.codeVerifier
             return codes.codeChallenge

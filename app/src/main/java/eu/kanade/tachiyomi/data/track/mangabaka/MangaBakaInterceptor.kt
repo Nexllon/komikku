@@ -16,15 +16,6 @@ class MangaBakaInterceptor(private val mangaBaka: MangaBaka) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
 
-        val path = originalRequest.url.encodedPath
-        if (path.startsWith("/mod/series/") && path.endsWith("/realtime")) {
-            // Only add User-Agent (same as curl, handled by call site: x-api-key and Accept)
-            return originalRequest.newBuilder()
-                .header("User-Agent", "Komikku/v${BuildConfig.VERSION_NAME} (Android) (https://github.com/xkana-shii/komikku)")
-                .build()
-                .let(chain::proceed)
-        }
-
         var currentAuth = oauth ?: throw Exception("Not authenticated with MangaBaka")
 
         if (currentAuth.isExpired()) {

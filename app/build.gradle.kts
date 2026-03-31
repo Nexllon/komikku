@@ -19,12 +19,6 @@ val devSecret: String = if (project.hasProperty("devSecret")) {
     "default-secret"
 }
 
-val mbPAT: String = if (project.hasProperty("mbPAT")) {
-    project.property("mbPAT") as String
-} else {
-    ""
-}
-
 shortcutHelper.setFilePath("./shortcuts.xml")
 
 android {
@@ -41,7 +35,6 @@ android {
         buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = false)}\"")
         buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
         buildConfigField("String", "DEV_OPTIONS", "\"${devSecret}\"")
-        buildConfigField("String", "MB_PAT", "\"${mbPAT}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -101,7 +101,7 @@ jobs:
         run: ./gradlew spotlessCheck
 
       - name: Build app
-        run: ./gradlew assembleRelease -Penable-updater -PdevSecret="${{ secrets.DEV_SECRETS }}" -PmbPAT="${{ secrets.MB_PAT }}"
+        run: ./gradlew assembleRelease -Penable-updater -PdevSecret="${{ secrets.DEV_SECRETS }}"
 
       - name: Run unit tests
         run: ./gradlew testReleaseUnitTest

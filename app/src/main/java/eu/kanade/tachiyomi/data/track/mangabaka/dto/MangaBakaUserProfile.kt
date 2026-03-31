@@ -13,6 +13,4 @@ data class MangaBakaUserProfile(
     // incomplete DTO since this is the only part we need
     @SerialName("rating_steps")
     val ratingSteps: Int,
-    val role: String,
-    val nickname: String,
 )

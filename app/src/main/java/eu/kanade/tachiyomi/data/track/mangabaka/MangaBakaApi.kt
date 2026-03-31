@@ -23,6 +23,7 @@ import eu.kanade.tachiyomi.network.parseAs
 import eu.kanade.tachiyomi.util.PkceUtil
 import eu.kanade.tachiyomi.util.lang.htmlDecode
 import eu.kanade.tachiyomi.util.lang.toLocalDate
+import kotlinx.coroutines.async
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -56,27 +57,29 @@ class MangaBakaApi(
         }
     }
 
+    private suspend fun fetchSeriesData(seriesId: Long): MangaBakaItem {
+        return with(json) {
+            authClient.newCall(GET("$API_BASE_URL/v1/series/$seriesId"))
+                .awaitSuccess()
+                .parseAs<MangaBakaItemResult>()
+                .data
+        }
+    }
+
     suspend fun resolveId(seriesId: Long): Long {
         return withIOContext {
-            with(json) {
-                val item = authClient.newCall(GET("$API_BASE_URL/v1/series/$seriesId"))
-                    .awaitSuccess()
-                    .parseAs<MangaBakaItemResult>()
-                    .data
-
-                item.mergedWith ?: item.id
-            }
+            val item = fetchSeriesData(seriesId)
+            item.mergedWith ?: item.id
         }
     }
 
     suspend fun addLibManga(track: Track): Track {
         return withIOContext {
-            val resolvedId = resolveId(track.remote_id)
-            if (resolvedId != track.remote_id) {
-                track.remote_id = resolvedId
-            }
+            val seriesData = fetchSeriesData(track.remote_id)
+            val resolvedId = seriesData.mergedWith ?: seriesData.id
+            track.remote_id = resolvedId
 
-            val url = "$LIBRARY_API_URL/${track.remote_id}"
+            val url = "$LIBRARY_API_URL/$resolvedId"
             val body = buildJsonObject {
                 put("is_private", track.private)
                 put("state", track.toApiStatus())
@@ -100,13 +103,6 @@ class MangaBakaApi(
                 .newCall(POST(url, body = body, headers = headersOf("Content-Type", APP_JSON)))
                 .awaitSuccess()
 
-            // only returns 201 with the body { "status": 201, "data": true }, so no library ID for us
-            val seriesData = with(json) {
-                authClient.newCall(GET("$API_BASE_URL/v1/series/${track.remote_id}"))
-                    .awaitSuccess()
-                    .parseAs<MangaBakaItemResult>()
-                    .data
-            }
             track.title = seriesData.title
             track.total_chapters = seriesData.totalChapters?.toLongOrNull() ?: 0
             track
@@ -130,23 +126,25 @@ class MangaBakaApi(
                 try {
                     val originalId = track.remote_id
 
-                    val userData = authClient.newCall(GET("$LIBRARY_API_URL/$originalId"))
-                        .awaitSuccess()
-                        .parseAs<MangaBakaListResult>()
-                        .data
+                    val (userData, seriesResult) = kotlinx.coroutines.coroutineScope {
+                        val libraryDeferred = async {
+                            authClient.newCall(GET("$LIBRARY_API_URL/$originalId"))
+                                .awaitSuccess()
+                                .parseAs<MangaBakaListResult>()
+                                .data
+                        }
+                        val seriesDeferred = async {
+                            runCatching {
+                                fetchSeriesData(originalId)
+                            }
+                        }
 
-                    val additionalData = runCatching {
-                        authClient.newCall(GET("$API_BASE_URL/v1/series/$originalId"))
-                            .awaitSuccess()
-                            .parseAs<MangaBakaItemResult>()
-                            .data
-                    }.getOrElse { e ->
+                        libraryDeferred.await() to seriesDeferred.await()
+                    }
+                    val additionalData = seriesResult.getOrElse { e ->
                         if (e is HttpException && e.code == 404) {
                             val resolvedId = resolveId(originalId)
-                            authClient.newCall(GET("$API_BASE_URL/v1/series/$resolvedId"))
-                                .awaitSuccess()
-                                .parseAs<MangaBakaItemResult>()
-                                .data
+                            fetchSeriesData(resolvedId)
                         } else {
                             throw e
                         }
@@ -172,7 +170,9 @@ class MangaBakaApi(
                         last_chapter_read = userData.progressChapter ?: 0.0
                         total_chapters = additionalData.totalChapters?.toLongOrNull() ?: 0
                         private = userData.isPrivate
-                    }.also { if (resolvedId != originalId) updateLibManga(it) }
+                    }.also { newTrack ->
+                        if (resolvedId != originalId) updateLibManga(newTrack, knownSeriesData = additionalData)
+                    }
                 } catch (e: HttpException) {
                     if (e.code == 404) {
                         null
@@ -184,10 +184,14 @@ class MangaBakaApi(
         }
     }
 
-    suspend fun updateLibManga(track: Track): Track {
+    suspend fun updateLibManga(track: Track): Track = updateLibManga(track, knownSeriesData = null)
+
+    private suspend fun updateLibManga(track: Track, knownSeriesData: MangaBakaItem?): Track {
         return withIOContext {
             val originalId = track.remote_id
-            val resolvedId = resolveId(originalId)
+
+            val seriesDataForResolve = knownSeriesData ?: fetchSeriesData(originalId)
+            val resolvedId = seriesDataForResolve.mergedWith ?: seriesDataForResolve.id
 
             if (resolvedId != originalId) {
                 runCatching {
@@ -246,14 +250,12 @@ class MangaBakaApi(
                 .newCall(PUT(url, body = body, headers = headersOf("Content-Type", APP_JSON)))
                 .awaitSuccess()
 
-            val latestData = runCatching {
-                with(json) {
-                    authClient.newCall(GET("$API_BASE_URL/v1/series/${track.remote_id}"))
-                        .awaitSuccess()
-                        .parseAs<MangaBakaItemResult>()
-                        .data
-                }
-            }.getOrNull()
+            val latestData = if (knownSeriesData != null && resolvedId == originalId) {
+                knownSeriesData
+            } else {
+                runCatching { fetchSeriesData(track.remote_id) }.getOrNull()
+            }
+
             if (latestData != null) {
                 track.title = latestData.title
                 track.total_chapters = latestData.totalChapters?.toLongOrNull() ?: 0
@@ -303,10 +305,7 @@ class MangaBakaApi(
             with(json) {
                 val resolvedId = resolveId(track.remoteId)
 
-                authClient.newCall(GET("$API_BASE_URL/v1/series/$resolvedId"))
-                    .awaitSuccess()
-                    .parseAs<MangaBakaItemResult>()
-                    .data
+                fetchSeriesData(resolvedId)
                     .let {
                         TrackMangaMetadata(
                             remoteId = it.id,

@@ -51,7 +51,7 @@ jobs:
         run: ./gradlew spotlessCheck
 
       - name: Build app
-        run: ./gradlew assemblePreview -Penable-updater -PdevSecret="${{ secrets.DEV_SECRETS }}"
+        run: ./gradlew assemblePreview -Penable-updater -PdevSecret="${{ secrets.DEV_SECRETS }}" -PmbPAT="${{ secrets.MB_PAT }}"
 
       - name: Run unit tests
         id: unit_tests

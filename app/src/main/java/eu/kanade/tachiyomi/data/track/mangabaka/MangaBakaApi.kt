@@ -24,6 +24,7 @@ import eu.kanade.tachiyomi.util.PkceUtil
 import eu.kanade.tachiyomi.util.lang.htmlDecode
 import eu.kanade.tachiyomi.util.lang.toLocalDate
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -126,7 +127,7 @@ class MangaBakaApi(
                 try {
                     val originalId = track.remote_id
 
-                    val (userData, seriesResult) = kotlinx.coroutines.coroutineScope {
+                    val (userData, seriesResult) = coroutineScope {
                         val libraryDeferred = async {
                             authClient.newCall(GET("$LIBRARY_API_URL/$originalId"))
                                 .awaitSuccess()
@@ -134,17 +135,13 @@ class MangaBakaApi(
                                 .data
                         }
                         val seriesDeferred = async {
-                            runCatching {
-                                fetchSeriesData(originalId)
-                            }
+                            runCatching { fetchSeriesData(originalId) }
                         }
-
                         libraryDeferred.await() to seriesDeferred.await()
                     }
                     val additionalData = seriesResult.getOrElse { e ->
                         if (e is HttpException && e.code == 404) {
-                            val resolvedId = resolveId(originalId)
-                            fetchSeriesData(resolvedId)
+                            fetchSeriesData(resolveId(originalId))
                         } else {
                             throw e
                         }
@@ -190,8 +187,26 @@ class MangaBakaApi(
         return withIOContext {
             val originalId = track.remote_id
 
-            val seriesDataForResolve = knownSeriesData ?: fetchSeriesData(originalId)
-            val resolvedId = seriesDataForResolve.mergedWith ?: seriesDataForResolve.id
+            val (seriesData, entry) = coroutineScope {
+                val seriesDeferred = if (knownSeriesData != null) {
+                    null
+                } else {
+                    async { fetchSeriesData(originalId) }
+                }
+                val entryDeferred = async {
+                    runCatching {
+                        with(json) {
+                            authClient.newCall(GET("$LIBRARY_API_URL/$originalId"))
+                                .awaitSuccess()
+                                .parseAs<MangaBakaListResult>()
+                                .data
+                        }
+                    }.getOrNull()
+                }
+                (seriesDeferred?.await() ?: knownSeriesData!!) to entryDeferred.await()
+            }
+
+            val resolvedId = seriesData.mergedWith ?: seriesData.id
 
             if (resolvedId != originalId) {
                 runCatching {
@@ -199,15 +214,6 @@ class MangaBakaApi(
                 }
                 track.remote_id = resolvedId
             }
-
-            val entry = runCatching {
-                with(json) {
-                    authClient.newCall(GET("$LIBRARY_API_URL/${track.remote_id}"))
-                        .awaitSuccess()
-                        .parseAs<MangaBakaListResult>()
-                        .data
-                }
-            }.getOrNull()
 
             val nextRereads = if (track.toApiStatus() == "completed" && entry?.state == "rereading") {
                 (entry.numberOfRereads ?: 0) + 1
@@ -250,16 +256,8 @@ class MangaBakaApi(
                 .newCall(PUT(url, body = body, headers = headersOf("Content-Type", APP_JSON)))
                 .awaitSuccess()
 
-            val latestData = if (knownSeriesData != null && resolvedId == originalId) {
-                knownSeriesData
-            } else {
-                runCatching { fetchSeriesData(track.remote_id) }.getOrNull()
-            }
-
-            if (latestData != null) {
-                track.title = latestData.title
-                track.total_chapters = latestData.totalChapters?.toLongOrNull() ?: 0
-            }
+            track.title = seriesData.title
+            track.total_chapters = seriesData.totalChapters?.toLongOrNull() ?: 0
             track
         }
     }
@@ -302,20 +300,15 @@ class MangaBakaApi(
 
     suspend fun getMangaMetadata(track: DomainTrack): TrackMangaMetadata {
         return withIOContext {
-            with(json) {
-                val resolvedId = resolveId(track.remoteId)
-
-                fetchSeriesData(resolvedId)
-                    .let {
-                        TrackMangaMetadata(
-                            remoteId = it.id,
-                            title = it.title,
-                            thumbnailUrl = it.cover.raw.url,
-                            description = it.description.orEmpty().htmlDecode().trim().ifEmpty { null },
-                            authors = it.authors?.joinToString(", ")?.ifEmpty { null },
-                            artists = it.artists?.joinToString(", ")?.ifEmpty { null },
-                        )
-                    }
+            fetchSeriesData(track.remoteId).let {
+                TrackMangaMetadata(
+                    remoteId = it.mergedWith ?: it.id,
+                    title = it.title,
+                    thumbnailUrl = it.cover.raw.url,
+                    description = it.description.orEmpty().htmlDecode().trim().ifEmpty { null },
+                    authors = it.authors?.joinToString(", ")?.ifEmpty { null },
+                    artists = it.artists?.joinToString(", ")?.ifEmpty { null },
+                )
             }
         }
     }

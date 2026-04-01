@@ -21,6 +21,8 @@ data class MangaBakaListEntry(
     @SerialName("progress_chapter")
     val progressChapter: Double?,
     val rating: Long?,
+    @SerialName("number_of_rereads")
+    val numberOfRereads: Int? = null,
 ) {
     fun getStatus(): Long = when (state) {
         "considering" -> MangaBaka.CONSIDERING

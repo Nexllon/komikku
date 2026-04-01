@@ -49,14 +49,34 @@ class MangaBakaApi(
 
     private val authClient = client.newBuilder().addInterceptor(interceptor).build()
 
+    suspend fun getMangaItem(seriesId: Long): MangaBakaItem {
+        return with(json) {
+            authClient.newCall(GET("$API_BASE_URL/v1/series/$seriesId"))
+                .awaitSuccess()
+                .parseAs<MangaBakaItemResult>()
+                .data
+        }
+    }
+
+    private suspend fun fetchSeriesData(seriesId: Long): MangaBakaItem {
+        return with(json) {
+            authClient.newCall(GET("$API_BASE_URL/v1/series/$seriesId"))
+                .awaitSuccess()
+                .parseAs<MangaBakaItemResult>()
+                .data
+        }
+    }
+
+    suspend fun resolveId(seriesId: Long): Long {
+        return withIOContext {
+            val item = fetchSeriesData(seriesId)
+            item.mergedWith ?: item.id
+        }
+    }
+
     suspend fun addLibManga(track: Track): Track {
         return withIOContext {
-            val seriesData = with(json) {
-                authClient.newCall(GET("$API_BASE_URL/v1/series/${track.remote_id}"))
-                    .awaitSuccess()
-                    .parseAs<MangaBakaItemResult>()
-                    .data
-            }
+            val seriesData = fetchSeriesData(track.remote_id)
             val resolvedId = seriesData.mergedWith ?: seriesData.id
             track.remote_id = resolvedId
 
@@ -84,7 +104,6 @@ class MangaBakaApi(
                 .newCall(POST(url, body = body, headers = headersOf("Content-Type", APP_JSON)))
                 .awaitSuccess()
 
-            // only returns 201 with the body { "status": 201, "data": true }, so no library ID for us
             track.title = seriesData.title
             track.total_chapters = seriesData.totalChapters?.toLongOrNull() ?: 0
             track
@@ -93,7 +112,8 @@ class MangaBakaApi(
 
     suspend fun deleteLibManga(track: DomainTrack) {
         withIOContext {
-            val url = "$LIBRARY_API_URL/${track.remoteId}"
+            val resolvedId = resolveId(track.remoteId)
+            val url = "$LIBRARY_API_URL/$resolvedId"
 
             authClient
                 .newCall(DELETE(url))
@@ -107,8 +127,6 @@ class MangaBakaApi(
                 try {
                     val originalId = track.remote_id
 
-                    // Fire GET /library and GET /series concurrently — 2 parallel requests
-                    // instead of 2 serial ones.
                     val (userData, seriesResult) = coroutineScope {
                         val libraryDeferred = async {
                             authClient.newCall(GET("$LIBRARY_API_URL/$originalId"))
@@ -117,24 +135,21 @@ class MangaBakaApi(
                                 .data
                         }
                         val seriesDeferred = async {
-                            runCatching {
-                                authClient.newCall(GET("$API_BASE_URL/v1/series/$originalId"))
-                                    .awaitSuccess()
-                                    .parseAs<MangaBakaItemResult>()
-                                    .data
-                            }
+                            runCatching { fetchSeriesData(originalId) }
                         }
                         libraryDeferred.await() to seriesDeferred.await()
                     }
-
-                    val additionalData = seriesResult.getOrElse { e -> throw e }
+                    val additionalData = seriesResult.getOrElse { e ->
+                        if (e is HttpException && e.code == 404) {
+                            fetchSeriesData(resolveId(originalId))
+                        } else {
+                            throw e
+                        }
+                    }
 
                     val resolvedId = additionalData.mergedWith ?: additionalData.id
 
                     if (resolvedId != originalId) {
-                        // The library entry for resolvedId already exists on the server
-                        // (userData was fetched from it). Only the stale old-ID entry needs
-                        // to be removed — no PUT needed here.
                         runCatching {
                             authClient.newCall(DELETE("$LIBRARY_API_URL/$originalId")).awaitSuccess()
                         }
@@ -152,6 +167,8 @@ class MangaBakaApi(
                         last_chapter_read = userData.progressChapter ?: 0.0
                         total_chapters = additionalData.totalChapters?.toLongOrNull() ?: 0
                         private = userData.isPrivate
+                    }.also { newTrack ->
+                        if (resolvedId != originalId) updateLibManga(newTrack, knownSeriesData = additionalData)
                     }
                 } catch (e: HttpException) {
                     if (e.code == 404) {
@@ -164,22 +181,17 @@ class MangaBakaApi(
         }
     }
 
-    suspend fun updateLibManga(track: Track): Track {
+    suspend fun updateLibManga(track: Track): Track = updateLibManga(track, knownSeriesData = null)
+
+    private suspend fun updateLibManga(track: Track, knownSeriesData: MangaBakaItem?): Track {
         return withIOContext {
             val originalId = track.remote_id
 
-            // Fire GET /series and GET /library concurrently.
-            // Series data serves dual purpose: resolving the canonical ID and populating
-            // title/totalChapters after the PUT — no post-PUT GET /series needed since a
-            // library PUT cannot change series-level fields.
             val (seriesData, entry) = coroutineScope {
-                val seriesDeferred = async {
-                    with(json) {
-                        authClient.newCall(GET("$API_BASE_URL/v1/series/$originalId"))
-                            .awaitSuccess()
-                            .parseAs<MangaBakaItemResult>()
-                            .data
-                    }
+                val seriesDeferred = if (knownSeriesData != null) {
+                    null
+                } else {
+                    async { fetchSeriesData(originalId) }
                 }
                 val entryDeferred = async {
                     runCatching {
@@ -191,7 +203,7 @@ class MangaBakaApi(
                         }
                     }.getOrNull()
                 }
-                seriesDeferred.await() to entryDeferred.await()
+                (seriesDeferred?.await() ?: knownSeriesData!!) to entryDeferred.await()
             }
 
             val resolvedId = seriesData.mergedWith ?: seriesData.id
@@ -244,7 +256,6 @@ class MangaBakaApi(
                 .newCall(PUT(url, body = body, headers = headersOf("Content-Type", APP_JSON)))
                 .awaitSuccess()
 
-            // Reuse series data from the parallel fetch above — no post-PUT GET needed.
             track.title = seriesData.title
             track.total_chapters = seriesData.totalChapters?.toLongOrNull() ?: 0
             track
@@ -289,21 +300,15 @@ class MangaBakaApi(
 
     suspend fun getMangaMetadata(track: DomainTrack): TrackMangaMetadata {
         return withIOContext {
-            with(json) {
-                authClient.newCall(GET("$API_BASE_URL/v1/series/${track.remoteId}"))
-                    .awaitSuccess()
-                    .parseAs<MangaBakaItemResult>()
-                    .data
-                    .let {
-                        TrackMangaMetadata(
-                            remoteId = it.mergedWith ?: it.id,
-                            title = it.title,
-                            thumbnailUrl = it.cover.raw.url,
-                            description = it.description.orEmpty().htmlDecode().trim().ifEmpty { null },
-                            authors = it.authors?.joinToString(", ")?.ifEmpty { null },
-                            artists = it.artists?.joinToString(", ")?.ifEmpty { null },
-                        )
-                    }
+            fetchSeriesData(track.remoteId).let {
+                TrackMangaMetadata(
+                    remoteId = it.mergedWith ?: it.id,
+                    title = it.title,
+                    thumbnailUrl = it.cover.raw.url,
+                    description = it.description.orEmpty().htmlDecode().trim().ifEmpty { null },
+                    authors = it.authors?.joinToString(", ")?.ifEmpty { null },
+                    artists = it.artists?.joinToString(", ")?.ifEmpty { null },
+                )
             }
         }
     }

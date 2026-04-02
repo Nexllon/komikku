@@ -101,11 +101,7 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
         return if (remoteTrack != null) {
             track.copyPersonalFrom(remoteTrack, copyRemotePrivate = false)
             track.title = remoteTrack.title
-            try {
-                track.total_chapters = remoteTrack.total_chapters
-            } catch (e: Exception) {
-                TODO("Not yet implemented")
-            }
+            track.total_chapters = remoteTrack.total_chapters
             track.tracking_url = "${MangaBakaApi.BASE_URL}/${remoteTrack.remote_id}"
             track.remote_id = api.resolveId(remoteTrack.remote_id)
 

@@ -4,7 +4,6 @@ import android.net.Uri
 import androidx.core.net.toUri
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.database.models.Track
-import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaItem
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaItemResult
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaListEntry
@@ -38,7 +37,6 @@ import uy.kohesive.injekt.injectLazy
 import java.math.RoundingMode
 import java.util.Collections
 import java.util.Locale
-import kotlin.time.Instant
 import tachiyomi.domain.track.model.Track as DomainTrack
 
 class MangaBakaApi(
@@ -128,7 +126,7 @@ class MangaBakaApi(
 
                 val finalEntry = if (resolvedId != originalId) {
                     val resolvedEntry = fetchLibraryEntry(resolvedId)
-                    val mergedEntry = mergeBestEntry(userData, resolvedEntry)
+                    val mergedEntry = userData.mergeWithResolved(resolvedEntry)
                     val mergedTrack = mergedEntry.toTrack(resolvedId, seriesData)
                     if (resolvedEntry == null) {
                         addLibManga(mergedTrack, knownSeriesData = seriesData, numberOfRereads = mergedEntry.numberOfRereads ?: 0)
@@ -345,46 +343,6 @@ class MangaBakaApi(
                 )
             }
         }
-    }
-
-    private fun MangaBakaListEntry.toTrack(resolvedId: Long, seriesData: MangaBakaItem): Track =
-        Track.create(TrackerManager.MANGABAKA).apply {
-            remote_id = resolvedId
-            title = seriesData.title
-            status = getStatus()
-            score = rating?.toDouble() ?: 0.0
-            started_reading_date = startDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
-            finished_reading_date = finishDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
-            last_chapter_read = progressChapter ?: 0.0
-            total_chapters = seriesData.totalChapters?.toLongOrNull() ?: 0
-            private = isPrivate
-        }
-
-    private fun mergeBestEntry(
-        originalEntry: MangaBakaListEntry,
-        resolvedEntry: MangaBakaListEntry?,
-    ): MangaBakaListEntry {
-        if (resolvedEntry == null) return originalEntry
-
-        val statusPriority = mapOf(
-            "completed" to 7,
-            "rereading" to 6,
-            "reading" to 5,
-            "paused" to 4,
-            "dropped" to 3,
-            "plan_to_read" to 2,
-            "considering" to 1,
-        )
-
-        return resolvedEntry.copy(
-            state = if ((statusPriority[resolvedEntry.state] ?: 0) >= (statusPriority[originalEntry.state] ?: 0)) resolvedEntry.state else originalEntry.state,
-            startDate = listOfNotNull(originalEntry.startDate, resolvedEntry.startDate).minOrNull(),
-            finishDate = listOfNotNull(originalEntry.finishDate, resolvedEntry.finishDate).maxOrNull(),
-            progressChapter = maxOf(originalEntry.progressChapter ?: 0.0, resolvedEntry.progressChapter ?: 0.0).takeIf { it > 0.0 },
-            rating = listOfNotNull(originalEntry.rating, resolvedEntry.rating).maxOrNull(),
-            numberOfRereads = maxOf(originalEntry.numberOfRereads ?: 0, resolvedEntry.numberOfRereads ?: 0),
-            isPrivate = originalEntry.isPrivate || resolvedEntry.isPrivate,
-        )
     }
 
     companion object {

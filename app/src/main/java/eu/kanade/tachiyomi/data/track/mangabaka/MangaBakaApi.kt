@@ -58,16 +58,11 @@ class MangaBakaApi(
 
     private val authClient = client.newBuilder().addInterceptor(interceptor).build()
 
-    suspend fun addLibManga(
-        track: Track,
-        knownSeriesData: MangaBakaItem? = null,
-        numberOfRereads: Int = 0,
-    ): Track {
+    suspend fun addLibManga(track: Track, knownSeriesData: MangaBakaItem? = null, numberOfRereads: Int = 0): Track {
         return withIOContext {
             val seriesData = knownSeriesData ?: fetchSeriesData(track.remote_id)
             val resolvedId = seriesData.mergedWith ?: seriesData.id
             track.remote_id = resolvedId
-            val url = "$LIBRARY_API_URL/$resolvedId"
             val body = buildJsonObject {
                 put("is_private", track.private)
                 put("state", track.toApiStatus())
@@ -91,7 +86,7 @@ class MangaBakaApi(
                 .toRequestBody()
 
             authClient
-                .newCall(POST(url, body = body, headers = headersOf("Content-Type", APP_JSON)))
+                .newCall(POST("$LIBRARY_API_URL/$resolvedId", body = body, headers = headersOf("Content-Type", APP_JSON)))
                 .awaitSuccess()
             libraryCache.remove(resolvedId)
             seriesCache.remove(resolvedId)
@@ -106,10 +101,8 @@ class MangaBakaApi(
     suspend fun deleteLibManga(track: DomainTrack) {
         withIOContext {
             val resolvedId = resolveId(track.remoteId)
-            val url = "$LIBRARY_API_URL/$resolvedId"
-
             authClient
-                .newCall(DELETE(url))
+                .newCall(DELETE("$LIBRARY_API_URL/$resolvedId"))
                 .awaitSuccess()
             libraryCache.remove(resolvedId)
             seriesCache.remove(resolvedId)
@@ -120,120 +113,36 @@ class MangaBakaApi(
         return withIOContext {
             try {
                 val originalId = track.remote_id
-                android.util.Log.d("MangaBakaTest", "findLibManga: originalId=$originalId")
 
                 val (userData, seriesResult) = coroutineScope {
-                    val libraryDeferred = async {
-                        fetchLibraryEntry(originalId)
-                    }
+                    async { fetchLibraryEntry(originalId) } to async { runCatching { fetchSeriesData(originalId) } }
+                }.let { (a, b) -> a.await() to b.await() }
 
-                    val seriesDeferred = async {
-                        runCatching { fetchSeriesData(originalId) }
-                    }
-
-                    libraryDeferred.await() to seriesDeferred.await()
+                val seriesData = seriesResult.getOrElse { e ->
+                    if (e is HttpException && e.code == 404) fetchSeriesData(resolveId(originalId)) else throw e
                 }
 
-                android.util.Log.d("MangaBakaTest", "findLibManga: userData for $originalId = $userData")
+                val resolvedId = seriesData.mergedWith ?: seriesData.id
 
-                val additionalData = seriesResult.getOrElse { e ->
-                    if (e is HttpException && e.code == 404) {
-                        android.util.Log.d("MangaBakaTest", "findLibManga: series 404 for originalId=$originalId, resolving id")
-                        fetchSeriesData(resolveId(originalId))
+                if (userData == null) return@withIOContext null
+
+                val finalEntry = if (resolvedId != originalId) {
+                    val resolvedEntry = fetchLibraryEntry(resolvedId)
+                    val mergedEntry = mergeBestEntry(userData, resolvedEntry)
+                    val mergedTrack = mergedEntry.toTrack(resolvedId, seriesData)
+                    if (resolvedEntry == null) {
+                        addLibManga(mergedTrack, knownSeriesData = seriesData, numberOfRereads = mergedEntry.numberOfRereads ?: 0)
                     } else {
-                        throw e
+                        updateLibManga(mergedTrack, knownSeriesData = seriesData, knownEntry = mergedEntry)
                     }
-                }
-
-                val resolvedId = additionalData.mergedWith ?: additionalData.id
-                android.util.Log.d("MangaBakaTest", "findLibManga: resolvedId=$resolvedId")
-
-                if (userData == null) {
-                    android.util.Log.d("MangaBakaTest", "findLibManga: no library entry for originalId=$originalId (no auto-create)")
-                    return@withIOContext null
-                }
-
-                // MERGE-ONLY AUTO-CREATE
-                val resolvedEntry = if (resolvedId != originalId) {
-                    val entry = fetchLibraryEntry(resolvedId)
-                    android.util.Log.d("MangaBakaTest", "findLibManga: resolvedEntry for $resolvedId = $entry")
-
-                    // Always merge best data from both entries, regardless of whether
-                    // the resolved ID already has an entry or not.
-                    val mergedEntry = mergeBestEntry(userData, entry)
-                    android.util.Log.d("MangaBakaTest", "findLibManga: mergedEntry for $resolvedId = $mergedEntry")
-
-                    // Build a track from the merged best data — used for both create and update paths
-                    val mergedTrack = Track.create(TrackerManager.MANGABAKA).apply {
-                        remote_id = resolvedId
-                        title = additionalData.title
-                        status = mergedEntry.getStatus()
-                        score = mergedEntry.rating?.toDouble() ?: 0.0
-                        started_reading_date = mergedEntry.startDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
-                        finished_reading_date = mergedEntry.finishDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
-                        last_chapter_read = mergedEntry.progressChapter ?: 0.0
-                        total_chapters = additionalData.totalChapters?.toLongOrNull() ?: 0
-                        private = mergedEntry.isPrivate
-                    }
-
-                    if (entry == null) {
-                        android.util.Log.d(
-                            "MangaBakaTest",
-                            "findLibManga: merged series detected, creating entry for resolvedId=$resolvedId from originalId=$originalId",
-                        )
-                        addLibManga(
-                            mergedTrack,
-                            knownSeriesData = additionalData,
-                            numberOfRereads = mergedEntry.numberOfRereads ?: 0,
-                        )
-                    } else {
-                        // Resolved entry existed but needs to be updated with the merged best data
-                        android.util.Log.d(
-                            "MangaBakaTest",
-                            "findLibManga: updating existing resolvedId=$resolvedId with merged best data",
-                        )
-                        updateLibManga(
-                            mergedTrack,
-                            knownSeriesData = additionalData,
-                            knownEntry = mergedEntry,
-                        )
-                    }
-                    // Either way, return mergedEntry so the final Track.create uses best data
                     mergedEntry
                 } else {
-                    null
+                    userData
                 }
 
-                // If we have a resolvedEntry (merged best data), use it.
-                // Only fall back to userData when this is not a merged series.
-                val finalEntry = resolvedEntry ?: userData
-
-                val totalChaptersLong = additionalData.totalChapters?.toLongOrNull()
-
-                Track.create(TrackerManager.MANGABAKA).apply {
-                    remote_id = resolvedId
-                    title = additionalData.title
-                    status = finalEntry.getStatus()
-                    score = finalEntry.rating?.toDouble() ?: 0.0
-                    started_reading_date = finalEntry.startDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
-                    finished_reading_date =
-                        finalEntry.finishDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
-                    last_chapter_read = finalEntry.progressChapter ?: 0.0
-                    total_chapters = totalChaptersLong ?: 0
-                    private = finalEntry.isPrivate
-                }.also {
-                    android.util.Log.d(
-                        "MangaBakaTest",
-                        "findLibManga: returning Track(remote_id=${it.remote_id}, last_chapter_read=${it.last_chapter_read}, score=${it.score}, private=${it.private}, started=${it.started_reading_date}, finished=${it.finished_reading_date})",
-                    )
-                }
+                finalEntry.toTrack(resolvedId, seriesData)
             } catch (e: HttpException) {
-                if (e.code == 404) {
-                    android.util.Log.d("MangaBakaTest", "findLibManga: HttpException 404 for originalId=${track.remote_id}")
-                    return@withIOContext null
-                } else {
-                    throw e
-                }
+                if (e.code == 404) null else throw e
             }
         }
     }
@@ -241,47 +150,26 @@ class MangaBakaApi(
     suspend fun updateLibManga(track: Track, knownSeriesData: MangaBakaItem? = null, knownEntry: MangaBakaListEntry? = null): Track {
         return withIOContext {
             val originalId = track.remote_id
-            android.util.Log.d("MangaBakaTest", "updateLibManga: originalId=$originalId")
 
-            val (seriesData, entry) = coroutineScope {
-                val seriesDeferred = if (knownSeriesData != null) {
-                    null
-                } else {
-                    async { fetchSeriesData(originalId) }
+            val (seriesData, entry) = if (knownSeriesData != null && knownEntry != null) {
+                knownSeriesData to knownEntry
+            } else {
+                coroutineScope {
+                    val seriesDeferred = if (knownSeriesData != null) null else async { fetchSeriesData(originalId) }
+                    val entryDeferred = if (knownEntry != null) null else async { runCatching { fetchLibraryEntry(originalId) }.getOrNull() }
+                    (seriesDeferred?.await() ?: knownSeriesData!!) to (entryDeferred?.await() ?: knownEntry)
                 }
-
-                val entryDeferred = if (knownEntry != null) {
-                    null
-                } else {
-                    async {
-                        runCatching {
-                            fetchLibraryEntry(originalId)
-                        }.getOrNull()
-                    }
-                }
-
-                (seriesDeferred?.await() ?: knownSeriesData!!) to
-                    (entryDeferred?.await() ?: knownEntry)
             }
 
-            android.util.Log.d("MangaBakaTest", "updateLibManga: entry for $originalId = $entry")
+            track.remote_id = seriesData.mergedWith ?: seriesData.id
 
-            val resolvedId = seriesData.mergedWith ?: seriesData.id
-            handleMergedId(track, resolvedId)
-            android.util.Log.d(
-                "MangaBakaTest",
-                "updateLibManga: resolvedId=$resolvedId, track.remote_id=${track.remote_id}, track.last_chapter_read=${track.last_chapter_read}, track.score=${track.score}, private=${track.private}",
-            )
+            val nextRereads = if (track.toApiStatus() == "completed" && entry?.state == "rereading") {
+                (entry.numberOfRereads ?: 0) + 1
+            } else {
+                entry?.numberOfRereads
+            }
 
-            val nextRereads =
-                if (track.toApiStatus() == "completed" && entry?.state == "rereading") {
-                    (entry.numberOfRereads ?: 0) + 1
-                } else {
-                    entry?.numberOfRereads
-                }
-
-            val url = "$LIBRARY_API_URL/${track.remote_id}"
-            val bodyJson = buildJsonObject {
+            val body = buildJsonObject {
                 put("state", track.toApiStatus())
                 put("is_private", track.private)
                 if (track.last_chapter_read > 0.0) {
@@ -308,15 +196,11 @@ class MangaBakaApi(
                     put("number_of_rereads", nextRereads)
                 }
             }
-
-            android.util.Log.d("MangaBakaTest", "updateLibManga: PUT $url body=$bodyJson")
-
-            val body = bodyJson
                 .toString()
                 .toRequestBody()
 
             authClient
-                .newCall(PUT(url, body = body, headers = headersOf("Content-Type", APP_JSON)))
+                .newCall(PUT("$LIBRARY_API_URL/${track.remote_id}", body = body, headers = headersOf("Content-Type", APP_JSON)))
                 .awaitSuccess()
 
             libraryCache.remove(track.remote_id)
@@ -354,7 +238,7 @@ class MangaBakaApi(
             cover_url = item.cover.x350.x3.orEmpty()
             tracking_url = "$BASE_URL/${item.mergedWith ?: item.id}"
             total_chapters = item.totalChapters?.toLongOrNull() ?: 0
-            start_date = item.year?.toString().orEmpty()
+            start_date = item.published.startDate.orEmpty()
             publishing_status = item.status
             publishing_type = item.type.replaceFirstChar { c ->
                 if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString()
@@ -403,7 +287,7 @@ class MangaBakaApi(
         Collections.synchronizedMap(
             object : LinkedHashMap<K, V>(maxSize + 1, 0.75f, true) {
                 override fun removeEldestEntry(eldest: Map.Entry<K, V>) = size > maxSize
-            }
+            },
         )
 
     private val seriesCache = lruCache<Long, CacheEntry<MangaBakaItem>>(MAX_CACHE_SIZE)
@@ -443,10 +327,6 @@ class MangaBakaApi(
         }
     }
 
-    private suspend fun handleMergedId(track: Track, resolvedId: Long) {
-        track.remote_id = resolvedId
-    }
-
     suspend fun resolveId(seriesId: Long): Long {
         val item = fetchSeriesData(seriesId)
         return item.mergedWith ?: item.id
@@ -467,35 +347,24 @@ class MangaBakaApi(
         }
     }
 
-    /**
-     * Merges two library entries (original and resolved) by picking the best value
-     * for each field:
-     * - startDate: earliest non-null date (user started reading sooner)
-     * - finishDate: latest non-null date (most recent completion)
-     * - progressChapter: highest value (furthest read)
-     * - rating: highest non-null value
-     * - numberOfRereads: max of both (highest known reread count wins)
-     * - state: most progressed status wins
-     *   (completed > rereading > reading > paused > dropped > plan_to_read > considering)
-     * - isPrivate: true if EITHER entry is private (privacy is never downgraded)
-     *
-     * When resolvedEntry is null (new merged series with no existing entry), returns
-     * originalEntry unchanged so the caller can create a fresh entry from it.
-     */
+    private fun MangaBakaListEntry.toTrack(resolvedId: Long, seriesData: MangaBakaItem): Track =
+        Track.create(TrackerManager.MANGABAKA).apply {
+            remote_id = resolvedId
+            title = seriesData.title
+            status = getStatus()
+            score = rating?.toDouble() ?: 0.0
+            started_reading_date = startDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
+            finished_reading_date = finishDate?.let { Instant.parse(it).toEpochMilliseconds() } ?: 0
+            last_chapter_read = progressChapter ?: 0.0
+            total_chapters = seriesData.totalChapters?.toLongOrNull() ?: 0
+            private = isPrivate
+        }
+
     private fun mergeBestEntry(
         originalEntry: MangaBakaListEntry,
         resolvedEntry: MangaBakaListEntry?,
     ): MangaBakaListEntry {
         if (resolvedEntry == null) return originalEntry
-
-        val bestStartDate = listOfNotNull(originalEntry.startDate, resolvedEntry.startDate).minOrNull()
-        val bestFinishDate = listOfNotNull(originalEntry.finishDate, resolvedEntry.finishDate).maxOrNull()
-        val bestProgress = maxOf(
-            originalEntry.progressChapter ?: 0.0,
-            resolvedEntry.progressChapter ?: 0.0,
-        ).takeIf { it > 0.0 }
-        val bestRating = listOfNotNull(originalEntry.rating, resolvedEntry.rating).maxOrNull()
-        val bestRereads = maxOf(originalEntry.numberOfRereads ?: 0, resolvedEntry.numberOfRereads ?: 0)
 
         val statusPriority = mapOf(
             "completed" to 7,
@@ -506,22 +375,15 @@ class MangaBakaApi(
             "plan_to_read" to 2,
             "considering" to 1,
         )
-        val bestState = if ((statusPriority[resolvedEntry.state] ?: 0) >= (statusPriority[originalEntry.state] ?: 0)) {
-            resolvedEntry.state
-        } else {
-            originalEntry.state
-        }
-
-        val bestPrivate = originalEntry.isPrivate || resolvedEntry.isPrivate
 
         return resolvedEntry.copy(
-            state = bestState,
-            startDate = bestStartDate,
-            finishDate = bestFinishDate,
-            progressChapter = bestProgress,
-            rating = bestRating,
-            numberOfRereads = bestRereads,
-            isPrivate = bestPrivate,
+            state = if ((statusPriority[resolvedEntry.state] ?: 0) >= (statusPriority[originalEntry.state] ?: 0)) resolvedEntry.state else originalEntry.state,
+            startDate = listOfNotNull(originalEntry.startDate, resolvedEntry.startDate).minOrNull(),
+            finishDate = listOfNotNull(originalEntry.finishDate, resolvedEntry.finishDate).maxOrNull(),
+            progressChapter = maxOf(originalEntry.progressChapter ?: 0.0, resolvedEntry.progressChapter ?: 0.0).takeIf { it > 0.0 },
+            rating = listOfNotNull(originalEntry.rating, resolvedEntry.rating).maxOrNull(),
+            numberOfRereads = maxOf(originalEntry.numberOfRereads ?: 0, resolvedEntry.numberOfRereads ?: 0),
+            isPrivate = originalEntry.isPrivate || resolvedEntry.isPrivate,
         )
     }
 
@@ -563,6 +425,11 @@ class MangaBakaApi(
         )
 
         private fun getPkceS256ChallengeCode(): String {
+            // MangaBaka requires an actually conformant PKCE process, unlike MAL
+            // 1. create verifier
+            // 2. create challenge from verifier (S256 hash -> base64 URL encode)
+            // 3. send challenge to /authorize
+            // 4. send verifier for access tokens to /token
             val codes = PkceUtil.generateS256Codes()
             codeVerifier = codes.codeVerifier
             return codes.codeChallenge

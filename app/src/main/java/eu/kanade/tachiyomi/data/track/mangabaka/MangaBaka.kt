@@ -98,7 +98,6 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
         hasReadChapters: Boolean,
     ): Track {
         val remoteTrack = api.findLibManga(track)
-
         return if (remoteTrack != null) {
             track.copyPersonalFrom(remoteTrack, copyRemotePrivate = false)
             track.title = remoteTrack.title

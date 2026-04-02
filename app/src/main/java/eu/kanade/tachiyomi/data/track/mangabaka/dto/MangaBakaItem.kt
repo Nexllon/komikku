@@ -21,7 +21,7 @@ data class MangaBakaItem(
     val authors: List<String>?,
     val artists: List<String>?,
     val description: String?,
-    val year: Int?,
+    val published: MangaBakaPublishData,
     val status: String,
     val type: String,
     val rating: Double?,
@@ -50,4 +50,10 @@ data class MangaBakaScaledCover(
     val x1: String?,
     val x2: String?,
     val x3: String?,
+)
+
+@Serializable
+data class MangaBakaPublishData(
+    @SerialName("start_date")
+    val startDate: String?,
 )

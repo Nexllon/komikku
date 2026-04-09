@@ -432,6 +432,9 @@ class MangaScreenModel(
         observeDownloads()
 
         screenModelScope.launchIO {
+            val autoRefreshOpenedManga = libraryPreferences.autoRefreshOpenedManga().get()
+            val autoResetChapterFlagsOnRefresh = libraryPreferences.autoResetChapterFlagsOnRefresh().get()
+
             val manga = getMangaAndChapters.awaitManga(mangaId)
 
             // SY -->
@@ -452,12 +455,15 @@ class MangaScreenModel(
             val meta = getFlatMetadata.await(mangaId)
             // SY <--
 
-            if (!manga.favorite || manga.initialized) {
+            val shouldAutoRefresh = autoRefreshOpenedManga && manga.initialized
+            val shouldAutoResetFlags = shouldAutoRefresh && autoResetChapterFlagsOnRefresh
+
+            if (shouldAutoResetFlags || !manga.favorite || !manga.initialized) {
                 setMangaDefaultChapterFlags.await(manga)
             }
 
-            val needRefreshInfo = !manga.initialized
-            val needRefreshChapter = chapters.isEmpty() || manga.initialized
+            val needRefreshInfo = !manga.initialized || shouldAutoRefresh
+            val needRefreshChapter = chapters.isEmpty() || !manga.initialized || shouldAutoRefresh
 
             // Show what we have earlier
             mutableState.update {

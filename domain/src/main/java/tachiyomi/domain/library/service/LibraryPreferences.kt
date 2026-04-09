@@ -298,6 +298,10 @@ class LibraryPreferences(
     fun libraryUpdateParallelSlots() = preferenceStore.getInt("library_update_parallel_slots", 1)
     // KMK <--
 
+    fun autoRefreshOpenedManga() = preferenceStore.getBoolean("auto_refresh_opened_manga", false)
+
+    fun autoResetChapterFlagsOnRefresh() = preferenceStore.getBoolean("auto_reset_chapter_flags_on_refresh", false)
+
     companion object {
         const val DEVICE_ONLY_ON_WIFI = "wifi"
         const val DEVICE_NETWORK_NOT_METERED = "network_not_metered"

@@ -44,6 +44,7 @@ import eu.kanade.tachiyomi.ui.category.genre.SortTagScreen
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.launch
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.interactor.ResetCategoryFlags
@@ -570,7 +571,23 @@ object SettingsLibraryScreen : SearchableSettings {
                     subtitle = stringResource(KMR.strings.pref_fetch_manga_chapters_on_add_description),
                 ),
                 // KMK <--
-            ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = libraryPreferences.autoRefreshOpenedManga(),
+                    title = stringResource(KMR.strings.pref_auto_refresh_opened_manga),
+                    subtitle = stringResource(KMR.strings.pref_auto_refresh_opened_manga_summary),
+                ),
+            ).let { items ->
+                val autoRefreshOpenedManga by libraryPreferences.autoRefreshOpenedManga().collectAsState()
+                if (autoRefreshOpenedManga) {
+                    items + Preference.PreferenceItem.SwitchPreference(
+                        preference = libraryPreferences.autoResetChapterFlagsOnRefresh(),
+                        title = stringResource(KMR.strings.pref_auto_reset_chapter_flags_on_refresh),
+                        subtitle = stringResource(KMR.strings.pref_auto_reset_chapter_flags_on_refresh_summary),
+                    )
+                } else {
+                    items
+                }
+            }.toPersistentList(),
         )
 
     // SY -->

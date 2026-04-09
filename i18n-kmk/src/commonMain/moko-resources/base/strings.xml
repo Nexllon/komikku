@@ -279,4 +279,9 @@
     <string name="dev_options_enabled">Developer options enabled</string>
     <string name="dev_options_incorrect_password">Incorrect password</string>
     <string name="dev_options_password_reset">Reset default password string</string>
+
+    <string name="pref_auto_refresh_opened_manga">Automatically refresh opened manga</string>
+    <string name="pref_auto_refresh_opened_manga_summary">Refresh manga info/chapters every time you open a manga, even if already initialized.</string>
+    <string name="pref_auto_reset_chapter_flags_on_refresh">Also reset chapter flags to default</string>
+    <string name="pref_auto_reset_chapter_flags_on_refresh_summary">When auto-refreshing, also reset chapter flags to your defaults.</string>
 </resources>

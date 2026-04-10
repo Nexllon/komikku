@@ -54,61 +54,14 @@ android {
             buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = true)}\"")
         }
 
-        val commonMatchingFallbacks = listOf(release.name)
-
-        create("releaseTest") {
-            initWith(release)
-
-            applicationIdSuffix = ".rt"
-            isMinifyEnabled = false
-            isShrinkResources = false
-
-            matchingFallbacks.addAll(commonMatchingFallbacks)
-        }
-        create("foss") {
-            initWith(release)
-
-            applicationIdSuffix = ".foss"
-
-            matchingFallbacks.addAll(commonMatchingFallbacks)
-        }
-        create("preview") {
-            initWith(release)
-
-            applicationIdSuffix = ".beta"
-
-            versionNameSuffix = debug.versionNameSuffix
-            signingConfig = debug.signingConfig
-
-            matchingFallbacks.addAll(commonMatchingFallbacks)
-
-            buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = false)}\"")
-        }
-        create("benchmark") {
-            initWith(release)
-
-            isDebuggable = false
-            isProfileable = true
-            versionNameSuffix = "${debug.versionNameSuffix}-benchmark"
-            applicationIdSuffix = ".benchmark"
-
-            signingConfig = debug.signingConfig
-
-            matchingFallbacks.addAll(commonMatchingFallbacks)
-        }
-    }
-
-    sourceSets {
-        getByName("preview").res.srcDirs("src/beta/res")
-        getByName("benchmark").res.srcDirs("src/debug/res")
     }
 
     splits {
         abi {
             isEnable = true
-            isUniversalApk = true
+            isUniversalApk = false
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            include("arm64-v8a")
         }
     }
 

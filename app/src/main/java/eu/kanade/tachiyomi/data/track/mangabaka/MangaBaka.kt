@@ -112,6 +112,17 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
                     PAUSED, DROPPED, PLAN_TO_READ, CONSIDERING -> track.status
                     else -> if (hasReadChapters) READING else track.status
                 }
+            } else {
+                try {
+                    val seriesData = api.fetchSeriesData(track.remote_id)
+                    val isCompletedRemotely = seriesData.status == "completed" || seriesData.status == "cancelled"
+                    val reachedEnd = track.total_chapters > 0 && track.last_chapter_read.toLong() == track.total_chapters
+                    if (!(isCompletedRemotely && reachedEnd)) {
+                        track.status = if (hasReadChapters) READING else PLAN_TO_READ
+                        track.finished_reading_date = 0
+                    }
+                } catch (_: Exception) {
+                }
             }
 
             update(track, hasReadChapters)
@@ -143,6 +154,20 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
             track.copyPersonalFrom(remoteTrack)
             track.title = remoteTrack.title
             track.total_chapters = remoteTrack.total_chapters
+
+            if (track.status == COMPLETED) {
+                try {
+                    val resolvedId = api.resolveId(track.remote_id)
+                    val seriesData = api.fetchSeriesData(resolvedId)
+                    val isCompletedRemotely = seriesData.status == "completed" || seriesData.status == "cancelled"
+                    val reachedEnd = track.total_chapters > 0 && track.last_chapter_read.toLong() == track.total_chapters
+                    if (!(isCompletedRemotely && reachedEnd)) {
+                        track.status = if (track.last_chapter_read > 0.0) READING else PLAN_TO_READ
+                        track.finished_reading_date = 0
+                    }
+                } catch (_: Exception) {
+                }
+            }
         }
         return track
     }

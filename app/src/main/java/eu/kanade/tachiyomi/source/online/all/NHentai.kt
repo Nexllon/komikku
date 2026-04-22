@@ -91,15 +91,9 @@ class NHentai(delegate: HttpSource, val context: Context) :
 
             preferredTitle = this@NHentai.preferredTitle
 
-            jsonResponse.cover?.path?.let {
-                coverImageUrl = "$thumbServer/$it"
-                coverImageType = it.parseType()
-            }
-
-            jsonResponse.thumbnail?.path?.let {
-                thumbnailImageUrl = "$thumbServer/$it"
-                thumbnailImageType = it.parseType()
-            }
+            coverImageUrl =
+                jsonResponse.cover?.path?.let { "$thumbServer/$it" }
+                    ?: jsonResponse.thumbnail?.path?.let { "$thumbServer/$it" }
 
             pageImagePreviewUrls = jsonResponse.pages.mapNotNull { it.thumbnail }
 
@@ -121,8 +115,6 @@ class NHentai(delegate: HttpSource, val context: Context) :
             }
         }
     }
-
-    private fun String.parseType(): String = this.substringAfterLast('.').first().toString()
 
     @Serializable
     data class JsonConfig(
@@ -208,9 +200,8 @@ class NHentai(delegate: HttpSource, val context: Context) :
     var nhConfig: JsonConfig? = null
     suspend fun getNhConfig() {
         try {
-            val response =
-                withIOContext { client.newCall(GET("https://nhentai.net/api/v2/config", headers)).awaitSuccess() }
-            val body = response.body.string()
+            val body = withIOContext { client.newCall(GET("https://nhentai.net/api/v2/config", headers)).awaitSuccess() }
+                .use { it.body.string() }
             nhConfig = jsonParser.decodeFromString<JsonConfig>(body)
         } catch (_: Exception) {
             nhConfig = JsonConfig(
@@ -221,7 +212,7 @@ class NHentai(delegate: HttpSource, val context: Context) :
     }
 
     val thumbServer
-        get() = nhConfig?.thumbServers?.random()
+        get() = nhConfig?.thumbServers?.randomOrNull() ?: "https://t1.nhentai.net"
 
     override suspend fun fetchPreviewImage(page: PagePreviewInfo, cacheControl: CacheControl?): Response {
         return client.newCachelessCallWithProgress(

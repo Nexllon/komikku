@@ -8,7 +8,6 @@ object CategoryMapper {
         name: String,
         order: Long,
         flags: Long,
-        parentId: Long?,
         // KMK -->
         hidden: Long,
         // KMK <--
@@ -18,7 +17,6 @@ object CategoryMapper {
             name = name,
             order = order,
             flags = flags,
-            parentId = parentId,
             // KMK -->
             hidden = hidden == 1L,
             // KMK <--

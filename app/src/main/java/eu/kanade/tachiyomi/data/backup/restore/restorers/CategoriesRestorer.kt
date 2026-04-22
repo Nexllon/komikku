@@ -30,7 +30,6 @@ class CategoriesRestorer(
                             it.name,
                             order,
                             it.flags,
-                            parentId = it.parentId,
                             // KMK -->
                             hidden = if (it.hidden) 1L else 0L,
                             // KMK <--

@@ -29,7 +29,6 @@ jobs:
       - name: Commit Spotless changes
         run: |
           git diff --quiet && exit 0
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -42,7 +41,6 @@ jobs:
       - name: Commit version bump
         run: |
           git diff --quiet && exit 0
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add app/build.gradle.kts
@@ -50,13 +48,28 @@ jobs:
           git push
 
       - name: Tag release
+        env:
+          BOT_PAT: ${{ secrets.BOT_PAT }}
         run: |
-          tag="v$(grep 'versionName = ' app/build.gradle.kts | sed -n 's/.*"\(.*\)".*/\1/p')"
+          set -euo pipefail
 
-          if git rev-parse "$tag" >/dev/null 2>&1; then
-            echo "tag $tag already exists"
+          tag="v$(grep 'versionName = ' app/build.gradle.kts | sed -n 's/.*"\(.*\)".*/\1/p')"
+          repo_url="https://x-access-token:${BOT_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases"
+
+          if git ls-remote --tags "$repo_url" | grep -q "refs/tags/${tag}"; then
+            echo "Tag ${tag} already exists, aborting."
             exit 1
           fi
 
-          git tag "$tag"
-          git push origin "$tag"
+          release_id=$(curl -sf -X POST \
+            -H "Authorization: token ${BOT_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "$api" \
+            -d "{\"tag_name\":\"${tag}\",\"target_commitish\":\"$(git rev-parse HEAD)\",\"name\":\"${tag}\",\"body\":\"Release ${tag}\",\"draft\":false,\"prerelease\":false}" \
+            | grep -Po '"id":\s*\K[0-9]+' | head -n1)
+
+          curl -sf -X DELETE \
+            -H "Authorization: token ${BOT_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "${api}/${release_id}"

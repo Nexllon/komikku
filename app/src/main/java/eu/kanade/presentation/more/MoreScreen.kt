@@ -22,6 +22,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -29,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +42,7 @@ import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.presentation.theme.TachiyomiPreviewTheme
 import eu.kanade.tachiyomi.R
+import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.ui.more.DownloadQueueState
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import exh.pref.DelegateSourcePreferences
@@ -54,6 +57,7 @@ import tachiyomi.presentation.core.components.material.TextButton
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -87,6 +91,11 @@ fun MoreScreen(
     val delegateSourcePreferences = remember { Injekt.get<DelegateSourcePreferences>() }
     // SY <--
 
+    // KMK --> Get network preferences and observe the value
+    val networkPreferences = remember { Injekt.get<NetworkPreferences>() }
+    val ignoreRateLimits by networkPreferences.ignoreRateLimits().collectAsState()
+    // KMK <--
+
     Scaffold { contentPadding ->
         ScrollbarLazyColumn(
             // KMK: use contentPadding as preferable padding for ScrollbarLazyColumn when not using stickyHeader
@@ -118,6 +127,20 @@ fun MoreScreen(
                     onCheckedChanged = onIncognitoModeChange,
                 )
             }
+
+            // KMK --> Ignore rate limits switch
+            item {
+                SwitchPreferenceWidget(
+                    title = stringResource(KMR.strings.pref_ignore_rate_limits),
+                    subtitle = stringResource(KMR.strings.pref_ignore_rate_limits_summary),
+                    icon = Icons.Outlined.Speed,
+                    checked = ignoreRateLimits, // Use the observed state
+                    onCheckedChanged = { newValue ->
+                        networkPreferences.ignoreRateLimits().set(newValue)
+                    },
+                )
+            }
+            // KMK <--
 
             item { HorizontalDivider() }
 

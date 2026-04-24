@@ -832,11 +832,6 @@ object SettingsAdvancedScreen : SearchableSettings {
                     title = stringResource(KMR.strings.dev_fast_download),
                     subtitle = stringResource(KMR.strings.dev_concurrent_pages),
                 ),
-                Preference.PreferenceItem.SwitchPreference(
-                    preference = networkPreferences.ignoreRateLimits(),
-                    title = stringResource(KMR.strings.pref_ignore_rate_limits),
-                    subtitle = stringResource(KMR.strings.pref_ignore_rate_limits_summary),
-                ),
                 Preference.PreferenceItem.SliderPreference(
                     value = maxConcurrentRequests,
                     title = stringResource(KMR.strings.pref_max_concurrent_requests),

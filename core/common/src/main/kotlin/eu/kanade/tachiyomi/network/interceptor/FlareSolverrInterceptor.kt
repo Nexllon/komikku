@@ -41,7 +41,7 @@ class FlareSolverrInterceptor(
 
         // FlareSolverr is disabled, so just proceed with the request.
         if (!preferences.enableFlareSolverr().get()) {
-            return chain.proceed(originalRequest)
+            return originalResponse
         }
 
         logcat { "Intercepting request: ${originalRequest.url}" }

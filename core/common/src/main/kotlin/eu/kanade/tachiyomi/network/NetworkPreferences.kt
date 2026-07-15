@@ -5,20 +5,11 @@ import tachiyomi.core.common.preference.PreferenceStore
 
 class NetworkPreferences(
     private val preferenceStore: PreferenceStore,
-    private val verboseLogging: Boolean = false,
 ) {
 
-    fun verboseLogging(): Preference<Boolean> {
+    /* KMK --> fun verboseLogging(): Preference<Boolean> {
         return preferenceStore.getBoolean("verbose_logging", verboseLogging)
-    }
-
-    fun enableFlareSolverr(): Preference<Boolean> {
-        return preferenceStore.getBoolean("enable_flare_solverr", false)
-    }
-
-    fun flareSolverrUrl(): Preference<String> {
-        return preferenceStore.getString("flare_solverr_url", "http://localhost:8191/v1")
-    }
+    } KMK <-- */
 
     fun dohProvider(): Preference<Int> {
         return preferenceStore.getInt("doh_provider", -1)

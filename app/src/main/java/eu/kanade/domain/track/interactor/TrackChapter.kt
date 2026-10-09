@@ -28,18 +28,30 @@ class TrackChapter(
      * Then update chapter progress to all trackers.
      * This does not update local chapters' read status.
      */
-    suspend fun await(context: Context, mangaId: Long, chapterNumber: Double, setupJobOnFailure: Boolean = true) {
+    suspend fun await(
+        context: Context,
+        mangaId: Long,
+        chapterNumber: Double,
+        setupJobOnFailure: Boolean = true,
+    ) {
         withNonCancellableContext {
             val tracks = getTracks.await(mangaId)
-            if (tracks.isEmpty()) return@withNonCancellableContext
+            if (
+                tracks.isEmpty() ||
+                !chapterNumber.isFinite() ||
+                chapterNumber < 0
+            ) {
+                return@withNonCancellableContext
+            }
 
             tracks.mapNotNull { track ->
                 val service = trackerManager.get(track.trackerId)
+
                 if (
                     service == null ||
                     !service.isLoggedIn ||
-                    chapterNumber <= track.lastChapterRead /* SY --> */ ||
-                    (service is MdList && track.status == FollowStatus.UNFOLLOWED.long)/* SY <-- */
+                    chapterNumber <= track.lastChapterRead ||
+                    (service is MdList && track.status == FollowStatus.UNFOLLOWED.long)
                 ) {
                     return@mapNotNull null
                 }
@@ -47,17 +59,34 @@ class TrackChapter(
                 async {
                     runCatching {
                         try {
-                            val updatedTrack = service.refresh(track.toDbTrack())
+                            val updatedTrack = service
+                                .refresh(track.toDbTrack())
                                 .toDomainTrack(idRequired = true)!!
-                                .copy(lastChapterRead = chapterNumber)
-                            service.update(updatedTrack.toDbTrack(), true)
-                            insertTrack.await(updatedTrack)
+                                .let {
+                                    it.copy(
+                                        lastChapterRead = maxOf(
+                                            it.lastChapterRead,
+                                            chapterNumber,
+                                        ),
+                                    )
+                                }
+
+                            val result = service
+                                .update(updatedTrack.toDbTrack(), true)
+                                .toDomainTrack(idRequired = true)!!
+
+                            insertTrack.await(result)
                             delayedTrackingStore.remove(track.id)
                         } catch (e: Exception) {
-                            delayedTrackingStore.add(track.id, chapterNumber)
+                            delayedTrackingStore.add(
+                                track.id,
+                                chapterNumber,
+                            )
+
                             if (setupJobOnFailure) {
                                 DelayedTrackingUpdateJob.setupTask(context)
                             }
+
                             throw e
                         }
                     }
@@ -65,7 +94,12 @@ class TrackChapter(
             }
                 .awaitAll()
                 .mapNotNull { it.exceptionOrNull() }
-                .forEach { logcat(LogPriority.WARN, it) }
+                .forEach {
+                    logcat(
+                        priority = LogPriority.WARN,
+                        throwable = it,
+                    )
+                }
         }
     }
 }

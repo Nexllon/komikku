@@ -249,8 +249,8 @@ class MangaBakaApi(
             tracking_url = "$BASE_URL/${item.mergedWith ?: item.id}"
             total_chapters = item.totalChapters?.toLongOrNull() ?: 0
             start_date = item.published.startDate.orEmpty()
-            publishing_status = item.status
-            publishing_type = item.type.replaceFirstChar { c ->
+            publishing_status = item.status.orEmpty()
+            publishing_type = item.type.orEmpty().replaceFirstChar { c ->
                 if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString()
             }
             authors = item.authors.orEmpty()
@@ -307,7 +307,7 @@ class MangaBakaApi(
         return withIOContext {
             seriesCache[seriesId]?.takeUnless { it.isExpired() }?.value ?: run {
                 val data = with(json) {
-                    authClient.newCall(GET("$API_BASE_URL/v1/series/$seriesId"))
+                    client.newCall(GET("$API_BASE_URL/v1/series/$seriesId"))
                         .awaitSuccess()
                         .parseAs<MangaBakaItemResult>()
                         .data
@@ -367,6 +367,9 @@ class MangaBakaApi(
         return resolveSeriesData(seriesId).id
     }
 
+    suspend fun resolveSeriesDataForExternalSources(seriesId: Long): MangaBakaItem =
+        resolveSeriesData(seriesId)
+
     suspend fun getMangaMetadata(track: DomainTrack): TrackMangaMetadata {
         return withIOContext {
             val resolvedId = try {
@@ -395,14 +398,7 @@ class MangaBakaApi(
 
             val seriesData = resolveSeriesData(resolvedId, item)
 
-            TrackMangaMetadata(
-                remoteId = seriesData.id,
-                title = seriesData.chooseBestTitle(),
-                thumbnailUrl = seriesData.cover.raw.url,
-                description = prepareDescription(seriesData.description).ifEmpty { null },
-                authors = seriesData.authors?.joinToString(", ")?.ifEmpty { null },
-                artists = seriesData.artists?.joinToString(", ")?.ifEmpty { null },
-            )
+            seriesData.toAutofillMetadata(prepareDescription(seriesData.description))
         }
     }
 

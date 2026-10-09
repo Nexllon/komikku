@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.di
 import android.app.Application
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.connections.service.ConnectionsPreferences
+import eu.kanade.domain.connections.service.WebhookPreferences
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.domain.track.service.TrackPreferences
@@ -82,6 +83,7 @@ class PreferenceModule(val app: Application) : InjektModule {
         }
         // AM (CONNECTIONS) -->
         addSingletonFactory { ConnectionsPreferences(get()) }
+        addSingletonFactory { WebhookPreferences(get()) }
         // <-- AM (CONNECTIONS)
 
         addSingletonFactory {

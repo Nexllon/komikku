@@ -5,12 +5,14 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.database.models.Track
 import eu.kanade.tachiyomi.data.track.BaseTracker
 import eu.kanade.tachiyomi.data.track.DeletableTracker
+import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.data.track.mangabaka.dto.MangaBakaOAuth
 import eu.kanade.tachiyomi.data.track.model.TrackMangaMetadata
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.serialization.json.Json
+import tachiyomi.domain.manga.model.SequelPrequelEntry
 import tachiyomi.i18n.MR
 import uy.kohesive.injekt.injectLazy
 import tachiyomi.domain.track.model.Track as DomainTrack
@@ -65,6 +67,10 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
             else -> throw Exception("Unknown score type")
         }
     }
+
+    override fun get10PointScore(track: DomainTrack): Double = track.score / 10.0
+
+    override fun indexToScore(index: Int): Double = getScoreList()[index].toDouble()
 
     override fun displayScore(track: DomainTrack): String = track.score.toInt().toString()
 
@@ -170,6 +176,25 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
             }
         }
         return track
+    }
+
+    // KMK --> Reuse KNS's cached series resolver, including merged MangaBaka IDs.
+    override suspend fun getRelatedEntries(remoteId: Long): List<SequelPrequelEntry> {
+        val item = api.fetchSeriesData(api.resolveId(remoteId))
+        return item.relationships.orEmpty().distinctBy { it.seriesId }.take(50).mapNotNull { relation ->
+            val related = api.fetchSeriesData(api.resolveId(relation.seriesId))
+            related.toRelatedEntry(relation.relationType, id)
+        }
+    }
+    // KMK <--
+
+    suspend fun getExternalSourceId(seriesId: Long, trackerId: Long): String? {
+        val source = api.resolveSeriesDataForExternalSources(seriesId).source
+        return when (trackerId) {
+            TrackerManager.MANGA_UPDATES -> source?.mangaUpdates?.id
+            TrackerManager.MY_ANIME_LIST -> source?.myAnimeList?.id?.toString()
+            else -> null
+        }
     }
 
     override suspend fun login(username: String, password: String) = login(password)

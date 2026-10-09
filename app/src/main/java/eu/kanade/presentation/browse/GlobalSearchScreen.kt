@@ -1,5 +1,6 @@
 package eu.kanade.presentation.browse
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
@@ -17,7 +18,7 @@ import eu.kanade.presentation.components.BulkSelectionToolbar
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.ui.browse.BulkFavoriteScreenModel
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.SearchItemResult
-import eu.kanade.tachiyomi.ui.browse.source.globalsearch.SearchScreenModel
+import eu.kanade.tachiyomi.ui.browse.source.globalsearch.SearchViewModel
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.SourceFilter
 import eu.kanade.tachiyomi.util.system.LocaleHelper
 import kotlinx.collections.immutable.ImmutableMap
@@ -27,7 +28,7 @@ import tachiyomi.domain.source.model.Source as DomainSource
 
 @Composable
 fun GlobalSearchScreen(
-    state: SearchScreenModel.State,
+    state: SearchViewModel.State,
     navigateUp: () -> Unit,
     onChangeSearchQuery: (String?) -> Unit,
     onSearch: (String) -> Unit,
@@ -159,25 +160,29 @@ internal fun GlobalSearchContent(
                     onClick = { onClickSource(source) },
                     modifier = Modifier.animateItem(),
                 ) {
-                    when (result) {
-                        SearchItemResult.Loading -> {
-                            GlobalSearchLoadingResultItem()
-                        }
-                        is SearchItemResult.Success -> {
-                            GlobalSearchCardRow(
-                                titles = result.result,
-                                getManga = getManga,
-                                onClick = onClickItem,
-                                onLongClick = onLongClickItem,
-                                // KMK -->
-                                selection = selection,
-                                // KMK <--
-                            )
-                        }
-                        is SearchItemResult.Error -> {
-                            GlobalSearchErrorResultItem(message = result.throwable.message)
+                    // KMK -->
+                    Crossfade(targetState = result, label = "globalSearchResult") { resultState ->
+                        when (resultState) {
+                            SearchItemResult.Loading -> {
+                                GlobalSearchLoadingResultItem()
+                            }
+                            is SearchItemResult.Success -> {
+                                GlobalSearchCardRow(
+                                    titles = resultState.result,
+                                    getManga = getManga,
+                                    onClick = onClickItem,
+                                    onLongClick = onLongClickItem,
+                                    // KMK -->
+                                    selection = selection,
+                                    // KMK <--
+                                )
+                            }
+                            is SearchItemResult.Error -> {
+                                GlobalSearchErrorResultItem(message = resultState.throwable.message)
+                            }
                         }
                     }
+                    // KMK <--
                 }
             }
         }

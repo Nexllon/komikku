@@ -1,25 +1,25 @@
+import com.android.build.api.variant.ApplicationVariant
+import com.android.build.api.variant.BuildConfigField
 import mihon.buildlogic.Config
-import mihon.buildlogic.getBuildTime
-import mihon.buildlogic.getCommitCount
-import mihon.buildlogic.getGitSha
+import mihon.buildlogic.getCurrentTime
+import mihon.buildlogic.getLatestCommitCount
+import mihon.buildlogic.getLatestCommitSha
+import mihon.buildlogic.getLatestCommitTime
+import mihon.buildlogic.tasks.ReplaceShortcutsPlaceholderTask
 
 plugins {
     id("mihon.android.application")
     id("mihon.android.application.compose")
-    id("com.github.zellius.shortcut-helper")
     kotlin("plugin.parcelize")
     kotlin("plugin.serialization")
     alias(libs.plugins.aboutLibraries)
+    // KMK -->
+    alias(libs.plugins.androidx.baselineProfile)
+    // KMK <--
     id("com.github.ben-manes.versions")
 }
 
-val devSecret: String = if (project.hasProperty("devSecret")) {
-    project.property("devSecret") as String
-} else {
-    "default-secret"
-}
-
-shortcutHelper.setFilePath("./shortcuts.xml")
+val devSecret = providers.gradleProperty("devSecret").getOrElse("default-secret")
 
 android {
     namespace = "eu.kanade.tachiyomi"
@@ -27,12 +27,9 @@ android {
     defaultConfig {
         applicationId = "app.komikku.kns"
 
-        versionCode = 128
-        versionName = "1.21.14"
+        versionCode = 144
+        versionName = "1.22.6"
 
-        buildConfigField("String", "COMMIT_COUNT", "\"${getCommitCount()}\"")
-        buildConfigField("String", "COMMIT_SHA", "\"${getGitSha()}\"")
-        buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = false)}\"")
         buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
         buildConfigField("String", "DEV_OPTIONS", "\"${devSecret}\"")
 
@@ -42,18 +39,62 @@ android {
     buildTypes {
         val debug by getting {
             applicationIdSuffix = ".dev"
-            versionNameSuffix = "-${getCommitCount()}"
             isPseudoLocalesEnabled = true
         }
         val release by getting {
+            // KMK -->
+            isProfileable = true
+            // KMK <--
             isMinifyEnabled = Config.enableCodeShrink
             isShrinkResources = Config.enableCodeShrink
 
             proguardFiles("proguard-android-optimize.txt", "proguard-rules.pro")
-
-            buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = true)}\"")
         }
 
+        val commonMatchingFallbacks = listOf(release.name)
+
+        create("releaseTest") {
+            initWith(release)
+
+            applicationIdSuffix = ".rt"
+            isMinifyEnabled = false
+            isShrinkResources = false
+
+            matchingFallbacks.addAll(commonMatchingFallbacks)
+        }
+        create("foss") {
+            initWith(release)
+
+            applicationIdSuffix = ".foss"
+
+            matchingFallbacks.addAll(commonMatchingFallbacks)
+        }
+        create("preview") {
+            initWith(release)
+
+            applicationIdSuffix = ".beta"
+
+            signingConfig = debug.signingConfig
+
+            matchingFallbacks.addAll(commonMatchingFallbacks)
+        }
+        create("benchmark") {
+            initWith(release)
+
+            isDebuggable = false
+            isProfileable = true
+            versionNameSuffix = "-benchmark"
+            applicationIdSuffix = ".benchmark"
+
+            signingConfig = debug.signingConfig
+
+            matchingFallbacks.addAll(commonMatchingFallbacks)
+        }
+    }
+
+    sourceSets {
+        getByName("preview").res.srcDirs("src/beta/res")
+        getByName("benchmark").res.srcDirs("src/debug/res")
     }
 
     splits {
@@ -73,7 +114,6 @@ android {
                 "libconscrypt_jni",
                 "libimagedecoder",
                 "libquickjs",
-                "libsqlite3x",
             )
                 .map { "**/$it.so" }
         }
@@ -135,7 +175,32 @@ kotlin {
     }
 }
 
+// KMK -->
+baselineProfile {
+    baselineProfileOutputDir = "baselineProfiles"
+    mergeIntoMain = true
+}
+
+androidComponents.finalizeDsl { android ->
+    // The profile plugin copies Kotlin source providers as "provider(?)" with this Kotlin/AGP
+    // combination. Resolve the original directories explicitly; '?' is invalid on Windows.
+    android.sourceSets.filter { it.name.startsWith("nonMinified") || (it.name.startsWith("benchmark") && it.name != "benchmark") }
+        .forEach { sourceSet ->
+            val originalName = sourceSet.name.removePrefix("nonMinified").removePrefix("benchmark")
+                .replaceFirstChar(Char::lowercaseChar)
+            val original = android.sourceSets.findByName(originalName) ?: return@forEach
+            @Suppress("DEPRECATION")
+            sourceSet.kotlin.setSrcDirs(
+                (sourceSet.kotlin.directories + original.kotlin.directories).filterNot { it.endsWith("provider(?)") },
+            )
+        }
+}
+// KMK <--
+
 dependencies {
+    // KMK -->
+    baselineProfile(projects.baselineProfile)
+    // KMK <--
     implementation(projects.i18n)
     // KMK -->
     implementation(projects.i18nKmk)
@@ -169,7 +234,9 @@ dependencies {
     implementation(androidx.paging.runtime)
     implementation(androidx.paging.compose)
 
-    implementation(libs.bundles.sqlite)
+    // KMK -->
+    implementation(libs.sqlite.bundled)
+    // KMK <--
     // SY -->
     implementation(sylibs.sqlcipher)
     // SY <--
@@ -230,7 +297,7 @@ dependencies {
 
     // UI libraries
     implementation(libs.material)
-    implementation(libs.flexible.adapter.core)
+    implementation(libs.flexibleAdapter)
     implementation(libs.photoview)
     implementation(libs.directionalviewpager) {
         exclude(group = "androidx.viewpager", module = "viewpager")
@@ -265,6 +332,10 @@ dependencies {
 
     // Tests
     testImplementation(libs.bundles.test)
+    // KMK -->
+    testImplementation(libs.sqldelight.sqlite.driver)
+    // KMK <--
+    testImplementation(libs.okhttp.mockwebserver)
     testRuntimeOnly(libs.junit.platform.launcher)
 
     // For detecting memory leaks; see https://square.github.io/leakcanary/
@@ -288,7 +359,45 @@ dependencies {
     implementation(sylibs.zxing.android.embedded)
 }
 
+val latestCommitCount = getLatestCommitCount()
+val latestCommitSha = getLatestCommitSha()
+val latestCommitTime = getLatestCommitTime()
+val currentTime = getCurrentTime()
+
+fun ApplicationVariant.buildConfigField(type: String, name: String, value: Provider<String>) {
+    buildConfigFields?.put(name, value.map { BuildConfigField(type, it, null) })
+}
+
 androidComponents {
+    onVariants { variant ->
+        val isUnstableBuild = variant.buildType in setOf("debug", "preview", "benchmark")
+        val buildTime = if (isUnstableBuild) currentTime else latestCommitTime
+
+        variant.buildConfigField("String", "COMMIT_COUNT", latestCommitCount.map { "\"$it\"" })
+        variant.buildConfigField("String", "COMMIT_SHA", latestCommitSha.map { "\"$it\"" })
+        variant.buildConfigField("String", "BUILD_TIME", buildTime.map { "\"$it\"" })
+
+        if (variant.buildType in setOf("debug", "preview")) {
+            variant.outputs.forEach { output ->
+                val versionName = output.versionName.get()
+                output.versionName.set(latestCommitCount.map { "$versionName-$it" })
+            }
+        }
+    }
+    // KMK -->
+    onVariants { variant ->
+        val resSource = variant.sources.res ?: return@onVariants
+
+        val variantName = variant.name.replaceFirstChar { it.uppercase() }
+        val replaceShortcutsPlaceholderTask = tasks.register<ReplaceShortcutsPlaceholderTask>(
+            "replace${variantName}ShortcutPlaceholder",
+        ) {
+            applicationId.set(variant.applicationId)
+            shortcutsFile.set(projectDir.resolve("src/main/shortcuts.xml"))
+        }
+        resSource.addGeneratedSourceDirectory(replaceShortcutsPlaceholderTask) { it.outputDir }
+    }
+    // KMK <--
     onVariants(selector().withFlavor("default" to "standard")) {
         // Only excluding in standard flavor because this breaks
         // Layout Inspector's Compose tree

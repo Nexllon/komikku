@@ -148,6 +148,7 @@ internal fun PreferenceItem(
                     title = item.title,
                     subtitle = item.subtitle,
                     icon = item.icon,
+                    widget = item.widget,
                     onPreferenceClick = item.onClick,
                 )
             }
@@ -172,6 +173,8 @@ internal fun PreferenceItem(
                 TrackingPreferenceWidget(
                     tracker = item.tracker,
                     checked = isLoggedIn,
+                    isPriority = item.isPriority && isLoggedIn,
+                    onLongClick = item.onLongClick.takeIf { isLoggedIn },
                     onClick = { if (isLoggedIn) item.logout() else item.login() },
                 )
             }

@@ -11,8 +11,9 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
-import cafe.adriel.voyager.core.model.StateScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.components.AppBar
@@ -24,13 +25,21 @@ import eu.kanade.tachiyomi.data.backup.create.BackupOptions
 import eu.kanade.tachiyomi.util.system.DeviceUtil
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.domain.category.interactor.GetCategories
+import tachiyomi.domain.category.model.Category
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.LabeledCheckbox
 import tachiyomi.presentation.core.components.LazyColumnWithAction
 import tachiyomi.presentation.core.components.SectionCard
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 class CreateBackupScreen : Screen() {
 
@@ -38,8 +47,8 @@ class CreateBackupScreen : Screen() {
     override fun Content() {
         val context = LocalContext.current
         val navigator = LocalNavigator.currentOrThrow
-        val model = rememberScreenModel { CreateBackupScreenModel() }
-        val state by model.state.collectAsState()
+        val viewModel = viewModel<CreateBackupViewModel>()
+        val state by viewModel.state.collectAsState()
 
         val chooseBackupDir = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.CreateDocument("application/*"),
@@ -50,7 +59,7 @@ class CreateBackupScreen : Screen() {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or
                         Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                 )
-                model.createBackup(context, it)
+                viewModel.createBackup(context, it)
                 navigator.pop()
             }
         }
@@ -88,13 +97,30 @@ class CreateBackupScreen : Screen() {
 
                 item {
                     SectionCard(MR.strings.label_library) {
-                        Options(BackupOptions.libraryOptions, state, model)
+                        Options(BackupOptions.libraryOptions, state, viewModel)
+                    }
+                }
+
+                item {
+                    SectionCard(MR.strings.categories) {
+                        LabeledCheckbox(
+                            label = stringResource(KMR.strings.backup_all_categories),
+                            checked = state.options.includedCategoryIds == null,
+                            onCheckedChange = { viewModel.selectAllCategories(it) },
+                        )
+                        state.categories.forEach { category ->
+                            LabeledCheckbox(
+                                label = if (category.isSystemCategory) stringResource(MR.strings.label_default) else category.name,
+                                checked = state.options.includedCategoryIds?.contains(category.id) ?: true,
+                                onCheckedChange = { viewModel.toggleCategory(category.id, it) },
+                            )
+                        }
                     }
                 }
 
                 item {
                     SectionCard(MR.strings.label_settings) {
-                        Options(BackupOptions.settingsOptions, state, model)
+                        Options(BackupOptions.settingsOptions, state, viewModel)
                     }
                 }
             }
@@ -104,8 +130,8 @@ class CreateBackupScreen : Screen() {
     @Composable
     private fun Options(
         options: ImmutableList<BackupOptions.Entry>,
-        state: CreateBackupScreenModel.State,
-        model: CreateBackupScreenModel,
+        state: CreateBackupViewModel.State,
+        model: CreateBackupViewModel,
     ) {
         options.forEach { option ->
             LabeledCheckbox(
@@ -120,10 +146,31 @@ class CreateBackupScreen : Screen() {
     }
 }
 
-private class CreateBackupScreenModel : StateScreenModel<CreateBackupScreenModel.State>(State()) {
+private class CreateBackupViewModel : ViewModel() {
+
+    val state: StateFlow<CreateBackupViewModel.State>
+        field = MutableStateFlow<CreateBackupViewModel.State>(State())
+
+    init {
+        viewModelScope.launchIO {
+            val categories = Injekt.get<GetCategories>().await().filterNot { it.isSystemCategory }
+            state.update { it.copy(categories = listOf(Category(0, "", 0, 0, false)) + categories) }
+        }
+    }
+
+    fun selectAllCategories(all: Boolean) {
+        state.update { it.copy(options = it.options.copy(includedCategoryIds = if (all) null else emptySet())) }
+    }
+
+    fun toggleCategory(id: Long, selected: Boolean) {
+        state.update {
+            val ids = it.options.includedCategoryIds ?: it.categories.map { category -> category.id }.toSet()
+            it.copy(options = it.options.copy(includedCategoryIds = if (selected) ids + id else ids - id))
+        }
+    }
 
     fun toggle(setter: (BackupOptions, Boolean) -> BackupOptions, enabled: Boolean) {
-        mutableState.update {
+        state.update {
             it.copy(
                 options = setter(it.options, enabled),
             )
@@ -137,5 +184,6 @@ private class CreateBackupScreenModel : StateScreenModel<CreateBackupScreenModel
     @Immutable
     data class State(
         val options: BackupOptions = BackupOptions(),
+        val categories: List<Category> = emptyList(),
     )
 }

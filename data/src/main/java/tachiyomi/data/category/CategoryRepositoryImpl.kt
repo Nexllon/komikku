@@ -1,93 +1,92 @@
 package tachiyomi.data.category
 
+import app.cash.sqldelight.async.coroutines.awaitAsList
+import app.cash.sqldelight.async.coroutines.awaitAsOne
+import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import kotlinx.coroutines.flow.Flow
 import tachiyomi.data.Database
-import tachiyomi.data.DatabaseHandler
+import tachiyomi.data.subscribeToList
 import tachiyomi.domain.category.model.Category
-import tachiyomi.domain.category.model.CategoryUpdate
 import tachiyomi.domain.category.repository.CategoryRepository
 
+// KMK -->
+
 class CategoryRepositoryImpl(
-    private val handler: DatabaseHandler,
+    private val database: Database,
 ) : CategoryRepository {
 
     override suspend fun get(id: Long): Category? {
-        return handler.awaitOneOrNull { categoriesQueries.getCategory(id, CategoryMapper::mapCategory) }
+        return database.categoryQueries.getCategory(id, CategoryMapper::mapCategory).awaitAsOneOrNull()
     }
 
     override suspend fun getAll(): List<Category> {
-        return handler.awaitList { categoriesQueries.getCategories(CategoryMapper::mapCategory) }
+        return database.categoryQueries.getCategories(CategoryMapper::mapCategory).awaitAsList()
     }
 
     override fun getAllAsFlow(): Flow<List<Category>> {
-        return handler.subscribeToList { categoriesQueries.getCategories(CategoryMapper::mapCategory) }
+        return database.categoryQueries.getCategories(CategoryMapper::mapCategory).subscribeToList()
     }
 
     override suspend fun getCategoriesByMangaId(mangaId: Long): List<Category> {
-        return handler.awaitList {
-            categoriesQueries.getCategoriesByMangaId(mangaId, CategoryMapper::mapCategory)
-        }
+        return database.categoryQueries.getCategoriesByMangaId(mangaId, CategoryMapper::mapCategory).awaitAsList()
     }
 
     override fun getCategoriesByMangaIdAsFlow(mangaId: Long): Flow<List<Category>> {
-        return handler.subscribeToList {
-            categoriesQueries.getCategoriesByMangaId(mangaId, CategoryMapper::mapCategory)
-        }
+        return database.categoryQueries.getCategoriesByMangaId(mangaId, CategoryMapper::mapCategory).subscribeToList()
     }
 
     // SY -->
     override suspend fun insert(category: Category): Long {
-        return handler.awaitOneExecutable(true) {
-            categoriesQueries.insert(
+        return database.transactionWithResult {
+            database.categoryQueries.insertReturningId(
                 name = category.name,
                 order = category.order,
                 flags = category.flags,
                 // KMK -->
                 hidden = if (category.hidden) 1L else 0L,
                 // KMK <--
-            )
-            categoriesQueries.selectLastInsertedRowId()
+            ).awaitAsOne()
         }
     }
     // SY <--
 
-    override suspend fun updatePartial(update: CategoryUpdate) {
-        handler.await {
-            updatePartialBlocking(update)
-        }
+    override suspend fun updateName(categoryId: Long, name: String) {
+        database.categoryQueries.updateName(name = name, id = categoryId)
     }
 
-    override suspend fun updatePartial(updates: List<CategoryUpdate>) {
-        handler.await(inTransaction = true) {
-            for (update in updates) {
-                updatePartialBlocking(update)
+    override suspend fun updateFlags(categoryId: Long, flags: Long) {
+        database.categoryQueries.updateFlags(flags = flags, id = categoryId)
+    }
+
+    // KMK -->
+    override suspend fun updateNameAndOrder(categoryId: Long, name: String, order: Long) {
+        database.categoryQueries.updateNameAndOrder(name = name, order = order, categoryId = categoryId)
+    }
+
+    override suspend fun updateHidden(categoryId: Long, hidden: Boolean) {
+        database.categoryQueries.updateHidden(hidden = if (hidden) 1L else 0L, categoryId = categoryId)
+    }
+    // KMK <--
+
+    override suspend fun updateAllFlags(flags: Long) {
+        database.categoryQueries.updateAllFlags(flags = flags)
+    }
+
+    override suspend fun updateAllOrders(orderedIds: List<Long>) {
+        database.transaction {
+            val current = database.categoryQueries.getUserCategoryIds().awaitAsList()
+            val ids = orderedIds.filter { it in current } + current.filterNot { it in orderedIds }
+            ids.forEachIndexed { index, categoryId ->
+                database.categoryQueries.updateOrder(order = -index - 2L, id = categoryId)
+            }
+            ids.forEachIndexed { index, categoryId ->
+                database.categoryQueries.updateOrder(order = index.toLong(), id = categoryId)
             }
         }
     }
 
-    private fun Database.updatePartialBlocking(update: CategoryUpdate) {
-        categoriesQueries.update(
-            name = update.name,
-            order = update.order,
-            flags = update.flags,
-            // KMK -->
-            hidden = update.hidden?.let { if (it) 1L else 0L },
-            // KMK <--
-            categoryId = update.id,
-        )
-    }
-
-    override suspend fun updateAllFlags(flags: Long?) {
-        handler.await {
-            categoriesQueries.updateAllFlags(flags)
-        }
-    }
-
     override suspend fun delete(categoryId: Long) {
-        handler.await {
-            categoriesQueries.delete(
-                categoryId = categoryId,
-            )
-        }
+        database.categoryQueries.delete(id = categoryId)
     }
 }
+// KMK <--

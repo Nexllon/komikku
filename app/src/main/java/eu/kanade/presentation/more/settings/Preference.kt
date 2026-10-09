@@ -31,9 +31,12 @@ sealed class Preference {
             override val title: String,
             override val subtitle: CharSequence? = null,
             override val enabled: Boolean = true,
+            // KMK --> Optional leading icon, rendered by the existing preference widget.
+            override val icon: ImageVector? = null,
+            // KMK <--
+            val widget: @Composable (() -> Unit)? = null,
             val onClick: (() -> Unit)? = null,
         ) : PreferenceItem<String, Unit>() {
-            override val icon: ImageVector? = null
             override val onValueChanged: suspend (value: String) -> Unit = {}
         }
 
@@ -145,6 +148,8 @@ sealed class Preference {
          * A [PreferenceItem] for individual tracker.
          */
         data class TrackerPreference(
+            val isPriority: Boolean = false,
+            val onLongClick: (() -> Unit)? = null,
             val tracker: Tracker,
             val login: () -> Unit,
             val logout: () -> Unit,

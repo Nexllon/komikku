@@ -11,6 +11,10 @@ The format is a modified version of [Keep a Changelog](https://keepachangelog.co
 - `Other` - for technical stuff.
 
 ## [Unreleased]
+### Fixed
+- Avoid checking for app and extension updates again on configuration changes.
+- Fixed reader initialization getting stuck after a configuration change.
+
 ### Added
 - [Hikka](https://hikka.io/) tracker support ([@Lorg0n](https://github.com/Lorg0n)) ([#1386](https://github.com/mihonapp/mihon/pull/1386))
   - Fix Hikka not defaulting to "Plan to Read" for unread titles ([@MajorTanya](https://github.com/MajorTanya)) ([#3534](https://github.com/mihonapp/mihon/pull/3534))
@@ -204,6 +208,9 @@ Same as v0.19.6
 - Fix 'Default' category showing in library with no user-added categories ([@AntsyLich](https://github.com/AntsyLich)) ([#2371](https://github.com/mihonapp/mihon/pull/2371))
 - Fix crash when opening filter sheet with an empty library ([@krysanify](https://github.com/krysanify/)) ([#2355](https://github.com/mihonapp/mihon/pull/2355))
 - Fix mark as read/unread not working for selected library items ([@krysanify](https://github.com/krysanify/)) ([#2355](https://github.com/mihonapp/mihon/pull/2355))
+
+### Removed
+- Predictive back support ([@AntsyLich](https://github.com/AntsyLich)) ([#2362](https://github.com/mihonapp/mihon/pull/2362))
 
 ## [v0.19.0] - 2025-08-04
 ### Added

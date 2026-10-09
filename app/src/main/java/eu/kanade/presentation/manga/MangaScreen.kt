@@ -83,6 +83,7 @@ import eu.kanade.presentation.manga.components.PagePreviewItems
 import eu.kanade.presentation.manga.components.PagePreviews
 import eu.kanade.presentation.manga.components.RelatedMangasRow
 import eu.kanade.presentation.manga.components.SearchMetadataChips
+import eu.kanade.presentation.manga.components.SequelPrequelRow
 import eu.kanade.presentation.util.formatChapterNumber
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.source.Source
@@ -96,7 +97,7 @@ import eu.kanade.tachiyomi.source.online.all.NHentai
 import eu.kanade.tachiyomi.source.online.all.Pururin
 import eu.kanade.tachiyomi.source.online.english.EightMuses
 import eu.kanade.tachiyomi.ui.manga.ChapterList
-import eu.kanade.tachiyomi.ui.manga.MangaScreenModel
+import eu.kanade.tachiyomi.ui.manga.MangaViewModel
 import eu.kanade.tachiyomi.ui.manga.MergedMangaData
 import eu.kanade.tachiyomi.ui.manga.PagePreviewState
 import eu.kanade.tachiyomi.util.system.copyToClipboard
@@ -136,7 +137,7 @@ import kotlin.math.roundToInt
 
 @Composable
 fun MangaScreen(
-    state: MangaScreenModel.State.Success,
+    state: MangaViewModel.State.Success,
     snackbarHostState: SnackbarHostState,
     nextUpdate: Instant?,
     isTabletUi: Boolean,
@@ -352,7 +353,7 @@ fun MangaScreen(
 
 @Composable
 private fun MangaScreenSmallImpl(
-    state: MangaScreenModel.State.Success,
+    state: MangaViewModel.State.Success,
     snackbarHostState: SnackbarHostState,
     nextUpdate: Instant?,
     chapterSwipeStartAction: LibraryPreferences.ChapterSwipeAction,
@@ -457,13 +458,9 @@ private fun MangaScreenSmallImpl(
     val readButtonPosition = uiPreferences.readButtonPosition()
     // KMK <--
 
-    BackHandler(onBack = {
-        if (isAnySelected) {
-            onAllChapterSelected(false)
-        } else {
-            navigateUp()
-        }
-    })
+    BackHandler(enabled = isAnySelected) {
+        onAllChapterSelected(false)
+    }
 
     Scaffold(
         topBar = {
@@ -715,12 +712,12 @@ private fun MangaScreenSmallImpl(
                     ) {
                         if (expandRelatedMangas) {
                             if (state.relatedMangasSorted?.isNotEmpty() != false) {
-                                item { HorizontalDivider() }
+                                item { HorizontalDivider(modifier = Modifier.animateItem()) }
                                 item(
                                     key = MangaScreenItem.RELATED_MANGAS,
                                     contentType = MangaScreenItem.RELATED_MANGAS,
                                 ) {
-                                    Column {
+                                    Column(modifier = Modifier.animateItem()) {
                                         RelatedMangaTitle(
                                             title = stringResource(KMR.strings.pref_source_related_mangas),
                                             subtitle = null,
@@ -737,7 +734,7 @@ private fun MangaScreenSmallImpl(
                                         )
                                     }
                                 }
-                                item { HorizontalDivider() }
+                                item { HorizontalDivider(modifier = Modifier.animateItem()) }
                             }
                         } else if (!showRelatedMangasInOverflow) {
                             item(
@@ -748,6 +745,7 @@ private fun MangaScreenSmallImpl(
                                     text = stringResource(KMR.strings.pref_source_related_mangas)
                                         .uppercase(),
                                     onClick = onRelatedMangasScreenClick,
+                                    modifier = Modifier.animateItem(),
                                 )
                             }
                         }
@@ -780,6 +778,10 @@ private fun MangaScreenSmallImpl(
                         )
                     }
                     // SY <--
+
+                    // KMK -->
+                    item(key = "sequel-prequel") { SequelPrequelRow(state.manga) }
+                    // KMK <--
 
                     item(
                         key = MangaScreenItem.CHAPTER_HEADER,
@@ -820,7 +822,7 @@ private fun MangaScreenSmallImpl(
 
 @Composable
 private fun MangaScreenLargeImpl(
-    state: MangaScreenModel.State.Success,
+    state: MangaViewModel.State.Success,
     snackbarHostState: SnackbarHostState,
     nextUpdate: Instant?,
     chapterSwipeStartAction: LibraryPreferences.ChapterSwipeAction,
@@ -929,13 +931,9 @@ private fun MangaScreenLargeImpl(
 
     val chapterListState = rememberLazyListState()
 
-    BackHandler(onBack = {
-        if (isAnySelected) {
-            onAllChapterSelected(false)
-        } else {
-            navigateUp()
-        }
-    })
+    BackHandler(enabled = isAnySelected) {
+        onAllChapterSelected(false)
+    }
 
     Scaffold(
         topBar = {
@@ -1164,6 +1162,9 @@ private fun MangaScreenLargeImpl(
                             )
                         }
                         // SY <--
+                        // KMK -->
+                        SequelPrequelRow(state.manga)
+                        // KMK <--
                     }
                 },
                 endContent = {
@@ -1190,7 +1191,7 @@ private fun MangaScreenLargeImpl(
                                             key = MangaScreenItem.RELATED_MANGAS,
                                             contentType = MangaScreenItem.RELATED_MANGAS,
                                         ) {
-                                            Column {
+                                            Column(modifier = Modifier.animateItem()) {
                                                 RelatedMangaTitle(
                                                     title = stringResource(KMR.strings.pref_source_related_mangas)
                                                         .uppercase(),
@@ -1208,7 +1209,7 @@ private fun MangaScreenLargeImpl(
                                                 )
                                             }
                                         }
-                                        item { HorizontalDivider() }
+                                        item { HorizontalDivider(modifier = Modifier.animateItem()) }
                                     }
                                 } else if (!showRelatedMangasInOverflow) {
                                     item(
@@ -1218,6 +1219,7 @@ private fun MangaScreenLargeImpl(
                                         OutlinedButtonWithArrow(
                                             text = stringResource(KMR.strings.pref_source_related_mangas),
                                             onClick = onRelatedMangasScreenClick,
+                                            modifier = Modifier.animateItem(),
                                         )
                                     }
                                 }
@@ -1434,7 +1436,7 @@ private fun onChapterItemClick(
 
 // SY -->
 typealias MetadataDescriptionComposable = @Composable (
-    state: MangaScreenModel.State.Success,
+    state: MangaViewModel.State.Success,
     openMetadataViewer: () -> Unit,
     search: (String) -> Unit,
 ) -> Unit

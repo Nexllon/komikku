@@ -25,6 +25,7 @@ import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.domain.track.interactor.RefreshTracks
 import eu.kanade.domain.track.interactor.SyncChapterProgressWithTrack
 import eu.kanade.domain.track.interactor.TrackChapter
+import eu.kanade.domain.track.interactor.UpdateTracks
 import mihon.data.extension.repository.ExtensionStoreRepositoryImpl
 import mihon.data.extension.service.ExtensionStoreService
 import mihon.domain.chapter.interactor.FilterChaptersForDownload
@@ -56,7 +57,6 @@ import tachiyomi.domain.category.interactor.ResetCategoryFlags
 import tachiyomi.domain.category.interactor.SetDisplayMode
 import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.category.interactor.SetSortModeForCategory
-import tachiyomi.domain.category.interactor.UpdateCategory
 import tachiyomi.domain.category.repository.CategoryRepository
 import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetChapter
@@ -114,7 +114,6 @@ class DomainModule : InjektModule {
         addFactory { CreateCategoryWithName(get(), get()) }
         addFactory { RenameCategory(get()) }
         addFactory { ReorderCategory(get()) }
-        addFactory { UpdateCategory(get()) }
         addFactory { DeleteCategory(get(), get(), get()) }
         // KMK -->
         addFactory { HideCategory(get()) }
@@ -153,6 +152,7 @@ class DomainModule : InjektModule {
         addFactory { TrackChapter(get(), get(), get(), get()) }
         addFactory { AddTracks(get(), get(), get(), get()) }
         addFactory { RefreshTracks(get(), get(), get(), get()) }
+        addFactory { UpdateTracks(get(), get(), get(), get()) }
         addFactory { DeleteTrack(get()) }
         addFactory { GetTracksPerManga(get(), get()) }
         addFactory { GetTracks(get()) }
@@ -167,7 +167,9 @@ class DomainModule : InjektModule {
         addFactory { UpdateChapter(get()) }
         addFactory { SetReadStatus(get(), get(), get(), get(), get()) }
         addFactory { ShouldUpdateDbChapter() }
-        addFactory { SyncChaptersWithSource(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+        // KMK -->
+        addFactory { SyncChaptersWithSource(get(), get(), get(), get(), get(), get(), get()) }
+        // KMK <--
         addFactory { GetAvailableScanlators(get()) }
         addFactory { FilterChaptersForDownload(get(), get(), get(), get()) }
 

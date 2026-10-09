@@ -3,12 +3,15 @@ package mihon.core.migration.migrations
 import android.app.Application
 import androidx.core.content.edit
 import androidx.preference.PreferenceManager
+import app.cash.sqldelight.async.coroutines.awaitAsList
 import mihon.core.migration.Migration
 import mihon.core.migration.MigrationContext
 import tachiyomi.core.common.util.lang.withIOContext
-import tachiyomi.data.DatabaseHandler
+import tachiyomi.data.Database
 import tachiyomi.data.category.CategoryMapper
 import tachiyomi.domain.library.service.LibraryPreferences
+
+// KMK -->
 
 class MoveSortingModeSettingsMigration : Migration {
     override val version: Float = 38f
@@ -17,7 +20,7 @@ class MoveSortingModeSettingsMigration : Migration {
         val context = migrationContext.get<Application>() ?: return@withIOContext false
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
         val libraryPreferences = migrationContext.get<LibraryPreferences>() ?: return@withIOContext false
-        val handler = migrationContext.get<DatabaseHandler>() ?: return@withIOContext false
+        val database = migrationContext.get<Database>() ?: return@withIOContext false
         // Handle renamed enum values
         val newSortingMode = when (
             val oldSortingMode = prefs.getString(libraryPreferences.sortingMode().key(), "ALPHABETICAL")
@@ -31,23 +34,20 @@ class MoveSortingModeSettingsMigration : Migration {
         prefs.edit {
             putString(libraryPreferences.sortingMode().key(), newSortingMode)
         }
-        handler.await(true) {
-            categoriesQueries.getCategories(CategoryMapper::mapCategory).executeAsList()
+        database.transaction {
+            database.categoryQueries.getCategories(CategoryMapper::mapCategory).awaitAsList()
                 .filter { (it.flags and 0b00111100L) == 0b00100000L }
                 .forEach {
-                    categoriesQueries.update(
-                        categoryId = it.id,
+                    // KMK -->
+                    database.categoryQueries.updateFlags(
+                        id = it.id,
                         flags = it.flags and 0b00111100L.inv(),
-                        name = null,
-                        order = null,
-                        // KMK -->
-                        hidden = null,
-                        // KMK <--
-
                     )
+                    // KMK <--
                 }
         }
 
         return@withIOContext true
     }
 }
+// KMK <--

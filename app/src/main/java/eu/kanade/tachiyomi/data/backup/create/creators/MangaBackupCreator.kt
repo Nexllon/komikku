@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.data.backup.create.creators
 
+import app.cash.sqldelight.async.coroutines.awaitAsList
 import eu.kanade.tachiyomi.data.backup.create.BackupOptions
 import eu.kanade.tachiyomi.data.backup.models.BackupChapter
 import eu.kanade.tachiyomi.data.backup.models.BackupFlatMetadata
@@ -12,9 +13,10 @@ import eu.kanade.tachiyomi.source.online.MetadataSource
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import exh.source.MERGED_SOURCE_ID
 import exh.source.getMainSource
-import tachiyomi.data.DatabaseHandler
+import tachiyomi.data.Database
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.domain.category.interactor.GetCategories
+import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.history.interactor.GetHistory
 import tachiyomi.domain.manga.interactor.GetCustomMangaInfo
 import tachiyomi.domain.manga.interactor.GetFlatMetadataById
@@ -24,8 +26,11 @@ import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
+// KMK -->
+
 class MangaBackupCreator(
-    private val handler: DatabaseHandler = Injekt.get(),
+    private val database: Database = Injekt.get(),
+    private val chapterRepository: ChapterRepository = Injekt.get(),
     private val getCategories: GetCategories = Injekt.get(),
     private val getHistory: GetHistory = Injekt.get(),
     // SY -->
@@ -55,9 +60,7 @@ class MangaBackupCreator(
 
         // SY -->
         if (manga.source == MERGED_SOURCE_ID) {
-            mangaObject.mergedMangaReferences = handler.awaitList {
-                mergedQueries.selectByMergeId(manga.id, backupMergedMangaReferenceMapper)
-            }
+            mangaObject.mergedMangaReferences = database.mergedQueries.selectByMergeId(manga.id, backupMergedMangaReferenceMapper).awaitAsList()
         }
 
         val source = sourceManager.get(manga.source)?.getMainSource<MetadataSource<*, *>>()
@@ -68,25 +71,21 @@ class MangaBackupCreator(
         }
         // SY <--
 
-        mangaObject.excludedScanlators = handler.awaitList {
-            excluded_scanlatorsQueries.getExcludedScanlatorsByMangaId(manga.id)
-        }
+        mangaObject.excludedScanlators = database.excluded_scanlatorQueries.getExcludedScanlatorsByMangaId(manga.id).awaitAsList()
 
         if (options.chapters) {
             // Backup all the chapters
-            handler.awaitList {
-                chaptersQueries.getChaptersByMangaId(
-                    mangaId = manga.id,
-                    applyFilter = 0, // false
-                    // KMK -->
-                    Manga.CHAPTER_SHOW_NOT_BOOKMARKED,
-                    Manga.CHAPTER_SHOW_BOOKMARKED,
-                    Manga.CHAPTER_SHOW_NOT_FILLERMARKED,
-                    Manga.CHAPTER_SHOW_FILLERMARKED,
-                    // KMK <--
-                    mapper = backupChapterMapper,
-                )
-            }
+            database.chapterQueries.getChaptersByMangaId(
+                mangaId = manga.id,
+                applyFilter = 0, // false
+                // KMK -->
+                Manga.CHAPTER_SHOW_NOT_BOOKMARKED,
+                Manga.CHAPTER_SHOW_BOOKMARKED,
+                Manga.CHAPTER_SHOW_NOT_FILLERMARKED,
+                Manga.CHAPTER_SHOW_FILLERMARKED,
+                // KMK <--
+                mapper = backupChapterMapper,
+            ).awaitAsList()
                 .takeUnless(List<BackupChapter>::isEmpty)
                 ?.let { mangaObject.chapters = it }
         }
@@ -94,13 +93,14 @@ class MangaBackupCreator(
         if (options.categories) {
             // Backup categories for this manga
             val categoriesForManga = getCategories.await(manga.id)
+                .filter { options.includedCategoryIds == null || it.id in options.includedCategoryIds }
             if (categoriesForManga.isNotEmpty()) {
                 mangaObject.categories = categoriesForManga.map { it.order }
             }
         }
 
         if (options.tracking) {
-            val tracks = handler.awaitList { manga_syncQueries.getTracksByMangaId(manga.id, backupTrackMapper) }
+            val tracks = database.manga_trackQueries.getTracksByMangaId(manga.id, backupTrackMapper).awaitAsList()
             if (tracks.isNotEmpty()) {
                 mangaObject.tracking = tracks
             }
@@ -109,9 +109,11 @@ class MangaBackupCreator(
         if (options.history) {
             val historyByMangaId = getHistory.await(manga.id)
             if (historyByMangaId.isNotEmpty()) {
-                val history = historyByMangaId.map { history ->
-                    val chapter = handler.awaitOne { chaptersQueries.getChapterById(history.chapterId) }
-                    BackupHistory(chapter.url, history.readAt?.time ?: 0L, history.readDuration)
+                val chapterUrlsById = chapterRepository.getChapterByMangaId(manga.id).associate { it.id to it.url }
+                val history = historyByMangaId.mapNotNull { history ->
+                    // A chapter removed since its history was read takes that history with it
+                    val url = chapterUrlsById[history.chapterId] ?: return@mapNotNull null
+                    BackupHistory(url, history.readAt?.time ?: 0L, history.readDuration)
                 }
                 if (history.isNotEmpty()) {
                     mangaObject.history = history
@@ -123,7 +125,7 @@ class MangaBackupCreator(
     }
 }
 
-private fun Manga.toBackupManga(/* SY --> */customMangaInfo: CustomMangaInfo?/* SY <-- */) =
+internal fun Manga.toBackupManga(/* SY --> */customMangaInfo: CustomMangaInfo?/* SY <-- */) =
     BackupManga(
         url = this.url,
         // SY -->
@@ -148,6 +150,9 @@ private fun Manga.toBackupManga(/* SY --> */customMangaInfo: CustomMangaInfo?/* 
         notes = this.notes,
         initialized = this.initialized,
         memo = MemoColumnAdapter.encode(this.memo),
+        lastUpdate = this.lastUpdate,
+        nextUpdate = this.nextUpdate,
+        fetchInterval = this.fetchInterval,
         // SY -->
     ).also { backupManga ->
         customMangaInfo?.let {
@@ -157,7 +162,9 @@ private fun Manga.toBackupManga(/* SY --> */customMangaInfo: CustomMangaInfo?/* 
             backupManga.customThumbnailUrl = it.thumbnailUrl
             backupManga.customDescription = it.description
             backupManga.customGenre = it.genre
+            backupManga.customGenreSet = it.genre != null
             backupManga.customStatus = it.status?.toInt() ?: 0
         }
     }
 // SY <--
+// KMK <--
